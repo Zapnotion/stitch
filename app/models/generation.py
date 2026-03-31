@@ -1,0 +1,131 @@
+"""
+models/generation.py — Pydantic-style dataclasses for generation requests and results.
+No paths hardcoded — all paths passed in as strings resolved by config.py upstream.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+class GenerationMode(str, Enum):
+    TEXT      = "text"
+    COVER     = "cover"
+    VOCAL     = "vocal"
+    REPAIR    = "repair"
+
+
+class OutputType(str, Enum):
+    WITH_VOCALS   = "with_vocals"
+    INSTRUMENTAL  = "instrumental"
+
+
+class LyricsMode(str, Enum):
+    AI_WRITES = "ai_writes"
+    USER      = "user"
+
+
+class RepairMode(str, Enum):
+    REGION    = "region"
+    FULL_FILE = "full_file"
+
+
+# ---------------------------------------------------------------------------
+# Request dataclasses
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TextGenerationRequest:
+    style_prompt:  str
+    output_type:   OutputType        = OutputType.WITH_VOCALS
+    lyrics_mode:   LyricsMode        = LyricsMode.AI_WRITES
+    user_lyrics:   str               = ""
+    duration_secs: int               = 30
+    variations:    int               = 4
+    seed:          Optional[int]     = None
+    lora:          Optional[str]     = None
+    output_dir:    str               = ""   # resolved by caller from cfg
+
+
+@dataclass
+class CoverRequest:
+    source_audio_path: str           # resolved absolute path
+    target_style:      str
+    new_lyrics:        str           = ""
+    follow_strength:   float         = 0.7  # 0=free restyle, 1=preserve structure
+    variations:        int           = 4
+    seed:              Optional[int] = None
+    output_dir:        str           = ""
+
+
+@dataclass
+class VocalBackingRequest:
+    vocal_audio_path: str            # dry vocal, absolute path
+    backing_style:    str
+    variations:       int            = 4
+    seed:             Optional[int]  = None
+    output_dir:       str            = ""
+
+
+@dataclass
+class RepairRequest:
+    source_audio_path: str           # absolute path
+    mode:              RepairMode    = RepairMode.REGION
+    region_start_sec:  float         = 0.0
+    region_end_sec:    float         = 0.0
+    hint_prompt:       str           = ""
+    output_dir:        str           = ""
+
+
+# ---------------------------------------------------------------------------
+# Result dataclass
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GenerationResult:
+    variation_index:   int
+    audio_path:        str           # absolute path to output file
+    seed:              int           = 0
+    duration_secs:     float         = 0.0
+    mode:              GenerationMode = GenerationMode.TEXT
+    style_prompt:      str           = ""
+    score:             float         = 0.0  # future: auto-quality score
+    starred:           bool          = False
+    stems:             dict[str, str] = field(default_factory=dict)
+    # stems = {"vocals": "/path/...", "drums": "...", "bass": "...", "other": "..."}
+
+    @property
+    def filename(self) -> str:
+        return Path(self.audio_path).name
+
+    @property
+    def duration_label(self) -> str:
+        total = int(self.duration_secs)
+        m, s = divmod(total, 60)
+        return f"{m}:{s:02d}"
+
+
+# ---------------------------------------------------------------------------
+# Progress signal payload
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GenerationProgress:
+    variation_index: int
+    total_variations: int
+    step:            int
+    total_steps:     int
+    message:         str = ""
+
+    @property
+    def overall_pct(self) -> float:
+        var_done = (self.variation_index - 1) / max(self.total_variations, 1)
+        step_pct = self.step / max(self.total_steps, 1) / self.total_variations
+        return min((var_done + step_pct) * 100, 100.0)
