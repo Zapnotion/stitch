@@ -229,8 +229,26 @@ class GeneratePage(QWidget):
         lay.addWidget(self._output_type_row)
 
         lay.addWidget(self._field_label("Lyrics"))
-        self._lyrics_mode_row = self._pill_row(["AI writes", "I provide"])
+        self._lyrics_mode_row = self._pill_row(["AI writes", "I provide", "Instrumental"])
         lay.addWidget(self._lyrics_mode_row)
+
+        # User lyrics box — shown only when "I provide" is selected
+        self._user_lyrics = QPlainTextEdit()
+        self._user_lyrics.setObjectName("PromptBox")
+        self._user_lyrics.setPlaceholderText(
+            "[Verse 1]\nYour lyrics here…\n\n[Chorus]\n…"
+        )
+        self._user_lyrics.setFixedHeight(110)
+        self._user_lyrics.setVisible(False)
+        lay.addWidget(self._user_lyrics)
+
+        # Toggle user lyrics box based on pill selection
+        def _on_lyrics_pill():
+            pills = self._lyrics_mode_row.findChildren(QPushButton)
+            show = len(pills) > 1 and pills[1].isChecked()
+            self._user_lyrics.setVisible(show)
+        for btn in self._lyrics_mode_row.findChildren(QPushButton):
+            btn.clicked.connect(_on_lyrics_pill)
 
         lay.addWidget(self._field_label("Style prompt"))
         self._style_prompt = QPlainTextEdit()
@@ -465,8 +483,24 @@ class GeneratePage(QWidget):
         seed_txt = self._seed_input.text().strip()
         seed     = int(seed_txt) if seed_txt.isdigit() else None
         lora_val = self._lora_combo.currentText()
+
+        # Determine lyrics mode from pill selection
+        mode_pills = self._lyrics_mode_row.findChildren(QPushButton)
+        lyrics_mode = LyricsMode.USER if (
+            len(mode_pills) > 1 and mode_pills[1].isChecked()
+        ) else LyricsMode.AI_WRITES
+
+        # Output type (vocals vs instrumental)
+        out_pills = self._output_type_row.findChildren(QPushButton)
+        out_type = OutputType.INSTRUMENTAL if (
+            len(out_pills) > 1 and out_pills[1].isChecked()
+        ) else OutputType.WITH_VOCALS
+
         req = TextGenerationRequest(
             style_prompt  = self._style_prompt.toPlainText().strip(),
+            lyrics_mode   = lyrics_mode,
+            user_lyrics   = self._user_lyrics.toPlainText().strip(),
+            output_type   = out_type,
             variations    = self._variations_spin.value(),
             duration_secs = self._duration_spin.value(),
             seed          = seed,
@@ -534,6 +568,11 @@ class GeneratePage(QWidget):
             self._progress_bar.setVisible(True)
 
     def _on_results(self, results: list[GenerationResult]) -> None:
+        from app.backend.logger import log
+        log.info(f"UI received {len(results) if results else 0} result(s)")
+        if not results:
+            log.warning("_on_results called with empty list")
+            return
         self._empty_lbl.setVisible(False)
         for r in results:
             # Record to session history

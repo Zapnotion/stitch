@@ -114,18 +114,27 @@ class SettingsDialog(QDialog):
         form.setContentsMargins(16, 16, 16, 16)
         form.setSpacing(10)
 
+        self._ace_version = QComboBox()
+        self._ace_version.addItems(["v1", "v1.5"])
+        self._ace_version.setToolTip(
+            "v1: Stable, proven. Lyrics via local LLM.\n"
+            "v1.5: Faster, built-in LLM for lyrics. Requires embedded Python 3.11 (auto-managed)."
+        )
+        form.addRow("ACE-Step version:", self._ace_version)
+
         self._ace_model = QLineEdit()
         self._ace_model.setPlaceholderText("ACE-Step/ACE-Step-v1-3.5B")
-        form.addRow("ACE-Step model ID:", self._ace_model)
+        form.addRow("ACE-Step model ID (v1):", self._ace_model)
 
         self._demucs_model = QComboBox()
         self._demucs_model.addItems(["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx_extra"])
         form.addRow("Demucs model:", self._demucs_model)
 
         info = QLabel(
-            "ACE-Step model IDs are HuggingFace repo IDs (e.g. ACE-Step/ACE-Step-v1-3.5B).\n"
-            "Models are cached in the Models cache directory above.\n"
-            "Changing the model ID takes effect after restarting Stitch."
+            "v1.5 requires a one-time setup of an embedded Python 3.11 (~25 MB) "
+            "and the ACE-Step 1.5 package. This happens automatically on next launch.\n\n"
+            "v1 model IDs are HuggingFace repo IDs. "
+            "Changes take effect after restarting Stitch."
         )
         info.setObjectName("InfoBox")
         info.setWordWrap(True)
@@ -200,6 +209,8 @@ class SettingsDialog(QDialog):
         self._stems_dir.setText(str(cfg.stems_dir))
 
         self._ace_model.setText(cfg.ace_step_model)
+        ver_idx = self._ace_version.findText(cfg.ace_step_version)
+        if ver_idx >= 0: self._ace_version.setCurrentIndex(ver_idx)
         idx = self._demucs_model.findText(cfg.demucs_model)
         if idx >= 0:
             self._demucs_model.setCurrentIndex(idx)
@@ -221,6 +232,7 @@ class SettingsDialog(QDialog):
             "inputs_dir":          self._inputs_dir.text(),
             "models_dir":          self._models_dir.text(),
             "stems_dir":           self._stems_dir.text(),
+            "ace_step_version":    self._ace_version.currentText(),
             "ace_step_model":      self._ace_model.text().strip(),
             "demucs_model":        self._demucs_model.currentText(),
             "output_format":       self._output_format.currentText(),

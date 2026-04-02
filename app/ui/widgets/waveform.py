@@ -100,7 +100,16 @@ class WaveformWidget(QWidget):
             return
         try:
             import soundfile as sf
-            data, sr = sf.read(self._audio_path, dtype="float32")
+            import os, sys
+            # Suppress ffmpeg/libsndfile stderr noise on Windows
+            devnull = open(os.devnull, 'w')
+            old_stderr = sys.stderr
+            sys.stderr = devnull
+            try:
+                data, sr = sf.read(self._audio_path, dtype="float32")
+            finally:
+                sys.stderr = old_stderr
+                devnull.close()
             if data.ndim > 1:
                 data = data.mean(axis=1)
             self._duration = len(data) / sr

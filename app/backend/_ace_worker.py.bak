@@ -1,0 +1,233 @@
+"""
+_ace_worker.py — ACE-Step generation worker.
+
+This script runs inside .venv_model (the isolated model venv).
+It receives a JSON payload as argv[1], runs the requested generation,
+and emits JSON lines to stdout that the parent process reads.
+
+Protocol (one JSON object per line on stdout):
+  {"type": "progress", "variation_index": 1, "step": 10, "total_steps": 50, "message": "..."}
+  {"type": "result",   "variation_index": 1, "audio_path": "...", "seed": 12345, ...}
+  {"type": "error",    "message": "..."}
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+
+
+def emit(obj: dict) -> None:
+    print(json.dumps(obj), flush=True)
+
+
+def progress(variation_index: int, step: int, total_steps: int, message: str, total: int = 1) -> None:
+    emit({
+        "type": "progress",
+        "variation_index": variation_index,
+        "total_variations": total,
+        "step": step,
+        "total_steps": total_steps,
+        "message": message,
+    })
+
+
+def result(variation_index: int, audio_path: str, seed: int,
+           duration: float, mode: str, style_prompt: str) -> None:
+    emit({
+        "type": "result",
+        "variation_index": variation_index,
+        "audio_path": audio_path,
+        "seed": seed,
+        "duration_secs": duration,
+        "mode": mode,
+        "style_prompt": style_prompt,
+    })
+
+
+def get_audio_duration(path: str) -> float:
+    try:
+        import soundfile as sf
+        return sf.info(path).duration
+    except Exception:
+        return 0.0
+
+
+def out_path(output_dir: str, mode: str, variation: int) -> str:
+    stamp = int(time.time())
+    uid   = uuid.uuid4().hex[:6]
+    return str(Path(output_dir) / f"{mode}_v{variation:02d}_{stamp}_{uid}.wav")
+
+
+# ---------------------------------------------------------------------------
+# Mode handlers
+# ---------------------------------------------------------------------------
+
+def run_text(p: dict) -> None:
+    from acestep.pipeline import ACEStepPipeline
+
+    total = p.get("variations", 1)
+    progress(1, 0, 1, "Loading ACE-Step model...", total)
+
+    pipe = ACEStepPipeline.from_pretrained(
+        p["model_id"],
+        cache_dir=p.get("models_dir"),
+        torch_dtype="auto",
+    ).to(p.get("device", "cpu"))
+
+    for i in range(1, total + 1):
+        seed = (p.get("seed") or int(time.time())) + i - 1
+        path = out_path(p["output_dir"], "gen", i)
+        progress(i, 0, 50, f"Generating variation {i}/{total}...", total)
+
+        audio = pipe(
+            prompt=p.get("style_prompt", ""),
+            lyrics=p.get("lyrics") or None,
+            duration=p.get("duration", 30),
+            seed=seed,
+            num_inference_steps=50,
+            guidance_scale=7.5,
+        )
+        pipe.save_audio(audio, path)
+
+        dur = get_audio_duration(path)
+        progress(i, 50, 50, f"Variation {i} complete", total)
+        result(i, path, seed, dur, "text", p.get("style_prompt", ""))
+
+
+def run_cover(p: dict) -> None:
+    from acestep.pipeline import ACEStepPipeline
+
+    total = p.get("variations", 1)
+    progress(1, 0, 1, "Loading ACE-Step model...", total)
+
+    pipe = ACEStepPipeline.from_pretrained(
+        p["model_id"],
+        cache_dir=p.get("models_dir"),
+        torch_dtype="auto",
+    ).to(p.get("device", "cpu"))
+
+    for i in range(1, total + 1):
+        seed = (p.get("seed") or int(time.time())) + i - 1
+        path = out_path(p["output_dir"], "cover", i)
+        progress(i, 0, 50, f"Generating cover {i}/{total}...", total)
+
+        audio = pipe.cover(
+            source_audio=p["source_audio"],
+            target_prompt=p.get("target_style", ""),
+            new_lyrics=p.get("new_lyrics") or None,
+            follow_strength=p.get("follow_strength", 0.7),
+            seed=seed,
+        )
+        pipe.save_audio(audio, path)
+
+        dur = get_audio_duration(path)
+        progress(i, 50, 50, f"Cover {i} complete", total)
+        result(i, path, seed, dur, "cover", p.get("target_style", ""))
+
+
+def run_vocal(p: dict) -> None:
+    from acestep.pipeline import ACEStepPipeline
+
+    total = p.get("variations", 1)
+    progress(1, 0, 1, "Loading ACE-Step model...", total)
+
+    pipe = ACEStepPipeline.from_pretrained(
+        p["model_id"],
+        cache_dir=p.get("models_dir"),
+        torch_dtype="auto",
+    ).to(p.get("device", "cpu"))
+
+    for i in range(1, total + 1):
+        seed = (p.get("seed") or int(time.time())) + i - 1
+        path = out_path(p["output_dir"], "vox", i)
+        progress(i, 0, 50, f"Generating backing {i}/{total}...", total)
+
+        audio = pipe.vocal_backing(
+            vocal_audio=p["vocal_audio"],
+            backing_prompt=p.get("backing_style", ""),
+            seed=seed,
+        )
+        pipe.save_audio(audio, path)
+
+        dur = get_audio_duration(path)
+        progress(i, 50, 50, f"Backing {i} complete", total)
+        result(i, path, seed, dur, "vocal", p.get("backing_style", ""))
+
+
+def run_repair(p: dict) -> None:
+    from acestep.pipeline import ACEStepPipeline
+
+    progress(1, 0, 1, "Loading ACE-Step model...", 1)
+
+    pipe = ACEStepPipeline.from_pretrained(
+        p["model_id"],
+        cache_dir=p.get("models_dir"),
+        torch_dtype="auto",
+    ).to(p.get("device", "cpu"))
+
+    path = out_path(p["output_dir"], "repair", 1)
+    progress(1, 10, 50, "Running repair pass...", 1)
+
+    audio = pipe.inpaint(
+        source_audio=p["source_audio"],
+        region_start=p.get("region_start", 0.0),
+        region_end=p.get("region_end", 0.0),
+        hint_prompt=p.get("hint_prompt") or None,
+    )
+    pipe.save_audio(audio, path)
+
+    dur = get_audio_duration(path)
+    progress(1, 50, 50, "Repair complete", 1)
+    result(1, path, 0, dur, "repair", p.get("hint_prompt", ""))
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        emit({"type": "error", "message": "No payload provided"})
+        sys.exit(1)
+
+    try:
+        payload = json.loads(sys.argv[1])
+    except json.JSONDecodeError as exc:
+        emit({"type": "error", "message": f"Bad payload JSON: {exc}"})
+        sys.exit(1)
+
+    mode = payload.get("mode", "text")
+
+    # Ensure output dir exists
+    out_dir = payload.get("output_dir", ".")
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    try:
+        if mode == "text":
+            run_text(payload)
+        elif mode == "cover":
+            run_cover(payload)
+        elif mode == "vocal":
+            run_vocal(payload)
+        elif mode == "repair":
+            run_repair(payload)
+        else:
+            emit({"type": "error", "message": f"Unknown mode: {mode}"})
+            sys.exit(1)
+    except ImportError as exc:
+        emit({"type": "error", "message": f"ACE-Step not installed in model venv: {exc}"})
+        sys.exit(1)
+    except Exception as exc:
+        import traceback
+        emit({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+        emit({"type": "error", "message": traceback.format_exc()})
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

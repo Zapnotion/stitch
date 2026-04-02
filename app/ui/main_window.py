@@ -13,13 +13,14 @@ from PySide6.QtWidgets import (
 )
 
 from app.backend.ace_step import ACEStepPipeline
-from app.backend.demucs import DemucsSeparator
+from app.backend.separator import StemSeparator
 from app.backend.worker import ModelLoaderWorker
 from app.config import cfg
 from app.ui.generate_page import GeneratePage
 from app.ui.history_page import HistoryPage
 from app.ui.repair_page import RepairPage
 from app.ui.settings_dialog import SettingsDialog
+from app.ui.widgets.log_panel import LogPanel
 
 
 class MainWindow(QMainWindow):
@@ -36,10 +37,10 @@ class MainWindow(QMainWindow):
             device     = cfg.device,
             models_dir = str(cfg.models_dir),
         )
-        self._separator = DemucsSeparator(
-            model          = cfg.demucs_model,
-            device         = cfg.device,
-            output_base_dir= str(cfg.stems_dir),
+        self._separator = StemSeparator(
+            device          = cfg.device,
+            output_base_dir = str(cfg.stems_dir),
+            model_cache_dir = str(cfg.models_dir),
         )
 
         self._build_ui()
@@ -144,6 +145,10 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self._stack, 1)
 
+        # --- Log panel ---
+        self._log_panel = LogPanel()
+        root.addWidget(self._log_panel)
+
         # --- Status bar ---
         self._status = QStatusBar()
         self._status.setObjectName("AppStatusBar")
@@ -205,6 +210,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        self._log_panel.shutdown()
         event.accept()
 
     # -----------------------------------------------------------------------
@@ -229,12 +235,14 @@ class MainWindow(QMainWindow):
         except Exception:
             device_str = "unknown device"
 
-        demucs_str = "Demucs ready" if self._separator.is_available else "Demucs not found"
+        demucs_str = "Stems ready" if self._separator.is_available else "No stem separator"
 
+        from app.config import cfg
+        ver_str = f"ACE-Step {cfg.ace_step_version}"
         if ok:
-            self._model_lbl.setText(f"● ACE-Step ready  ·  {demucs_str}  ·  {device_str}")
+            self._model_lbl.setText(f"● {ver_str} ready  ·  {demucs_str}  ·  {device_str}")
         else:
-            self._model_lbl.setText(f"⚠ ACE-Step not installed (stub mode)  ·  {device_str}")
+            self._model_lbl.setText(f"⚠ {ver_str} not installed (stub mode)  ·  {device_str}")
 
     # -----------------------------------------------------------------------
     # VRAM polling
@@ -597,7 +605,7 @@ class MainWindow(QMainWindow):
                 margin: -4px 0;
             }
             #ScrubSlider::handle:horizontal:hover { background: #DEDEDE; }
-            #TimeLabel { font-size: 10px; color: #555; font-variant-numeric: tabular-nums; }
+            #TimeLabel { font-size: 10px; color: #555; font-family: "Courier New", monospace; }
 
             /* Presets panel */
             #SectionHeader {
@@ -712,6 +720,37 @@ class MainWindow(QMainWindow):
                 color: #DEDEDE;
                 padding: 5px 8px;
                 font-size: 12px;
+            }
+
+            /* Log panel */
+            #LogBar {
+                background: #161616;
+                border-top: 1px solid #242424;
+            }
+            #LogToggle {
+                background: transparent;
+                border: none;
+                color: #555;
+                font-size: 10px;
+                text-align: left;
+                padding: 0;
+            }
+            #LogToggle:hover   { color: #888; }
+            #LogToggle:checked { color: #AAA; }
+            #LogClear {
+                background: transparent;
+                border: none;
+                color: #444;
+                font-size: 10px;
+            }
+            #LogClear:hover { color: #888; }
+            #LogView {
+                background: #0E0E0E;
+                border: none;
+                border-top: 1px solid #222;
+                color: #888;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 11px;
             }
 
             /* Status bar */

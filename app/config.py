@@ -52,8 +52,8 @@ _ALL_DIRS = [
 
 _DEFAULTS: dict = {
     "theme": "dark",
-    "default_variations": 4,
-    "default_duration": 30,
+    "default_variations": 1,
+    "default_duration": 15,
     "default_sample_rate": 44100,
     "ace_step_model": "ACE-Step/ACE-Step-v1-3.5B",
     "demucs_model": "htdemucs",
@@ -150,6 +150,10 @@ class StitchConfig:
     @property
     def ace_step_model(self) -> str:
         return self._data.get("ace_step_model", _DEFAULTS["ace_step_model"])
+
+    @property
+    def ace_step_version(self) -> str:
+        return self._data.get("ace_step_version", "v1")
 
     @property
     def demucs_model(self) -> str:

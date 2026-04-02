@@ -273,17 +273,16 @@ class RepairPage(QWidget):
         self._after_player.load(r.audio_path)
         self._save_repaired_btn.setEnabled(True)
 
-        # Disconnect previous connections to avoid stacking signals across repeated repairs
-        try: self._keep_repaired_btn.clicked.disconnect()
-        except RuntimeError: pass
-        try: self._keep_original_btn.clicked.disconnect()
-        except RuntimeError: pass
-        try: self._save_repaired_btn.clicked.disconnect()
-        except RuntimeError: pass
+        # Block signals, reconnect, then unblock — avoids stacking and warnings
+        for btn in [self._keep_repaired_btn, self._keep_original_btn, self._save_repaired_btn]:
+            btn.blockSignals(True)
 
         self._keep_repaired_btn.clicked.connect(lambda: self._accept_repair(r))
         self._keep_original_btn.clicked.connect(self._reject_repair)
         self._save_repaired_btn.clicked.connect(lambda: self._on_save_repaired(r))
+
+        for btn in [self._keep_repaired_btn, self._keep_original_btn, self._save_repaired_btn]:
+            btn.blockSignals(False)
 
         # Record to session history
         session.record(

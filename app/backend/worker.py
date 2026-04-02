@@ -10,7 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import QThread, Signal
 
 from app.backend.ace_step import ACEStepPipeline
-from app.backend.demucs import DemucsSeparator
+from app.backend.separator import StemSeparator
 from app.models.generation import (
     CoverRequest,
     GenerationProgress,
@@ -135,7 +135,7 @@ class StemWorker(QThread):
 
     def __init__(
         self,
-        separator: DemucsSeparator,
+        separator: StemSeparator,
         audio_path: str,
         job_id: str,
     ) -> None:
