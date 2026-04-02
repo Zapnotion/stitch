@@ -47,6 +47,7 @@ class TextGenerationRequest:
     output_type:   OutputType        = OutputType.WITH_VOCALS
     lyrics_mode:   LyricsMode        = LyricsMode.AI_WRITES
     user_lyrics:   str               = ""
+    lyrics_prompt: str               = ""   # AI writes: what to sing about
     duration_secs: int               = 30
     variations:    int               = 4
     seed:          Optional[int]     = None

@@ -265,9 +265,22 @@ def _get_handlers(p: dict):
 # Build GenerationParams for each task type
 # ---------------------------------------------------------------------------
 
-def _make_params(p: dict, seed: int, variation_idx: int, total: int):
+def _make_params(p: dict, seed: int, variation_idx: int, total: int,
+                 llm_handler=None):
     """
     Construct a GenerationParams object from our payload.
+
+    For text mode we handle three distinct paths:
+      - lyrics_mode=ai_writes + output_type=with_vocals:
+            Use create_sample() — the LM writes caption, lyrics, bpm, key, etc.
+            from the style_prompt as a natural-language query.
+      - lyrics_mode=ai_writes + output_type=instrumental:
+            Use create_sample() with instrumental=True.
+      - lyrics_mode=user + output_type=with_vocals:
+            Pass user-supplied lyrics directly. Caption = style_prompt.
+      - lyrics_mode=user + output_type=instrumental:
+            Pass lyrics="[Instrumental]" — ACE-Step convention for no vocals.
+
     We use inspect to guard against version differences in the dataclass.
     """
     from acestep.inference import GenerationParams
@@ -278,18 +291,85 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int):
     def f(**kwargs):
         return {k: v for k, v in kwargs.items() if k in fields}
 
-    mode = p.get("mode", "text")
+    mode         = p.get("mode", "text")
+    lyrics_mode  = p.get("lyrics_mode", "ai_writes")   # "ai_writes" | "user"
+    output_type  = p.get("output_type", "with_vocals")  # "with_vocals" | "instrumental"
+    instrumental = (output_type == "instrumental")
 
     base = f(
-        seed             = seed,
-        audio_duration   = float(p.get("duration", 30.0)),
+        seed           = seed,
+        audio_duration = float(p.get("duration", 30.0)),
     )
 
+    # Vocal scaffold used when no lyrics are available but vocals are wanted.
+    # An empty string tells ACE-Step "no vocals" — we need at least a structural
+    # hint so the DiT knows to generate a sung vocal track.
+    VOCAL_SCAFFOLD = "[Verse]\n[Chorus]"
+
     if mode == "text":
-        base.update(f(
-            caption          = p.get("style_prompt", ""),
-            lyrics           = p.get("lyrics") or "",
-        ))
+        if lyrics_mode == "ai_writes" and llm_handler is not None:
+            # Full LM path — create_sample writes caption + lyrics from the
+            # style prompt used as a natural-language query.
+            try:
+                from acestep.inference import create_sample
+                # lyrics_prompt drives what the LM writes about (theme,
+                # subject, language, mood). Falls back to style_prompt if
+                # the user left it blank.
+                lp = p.get("lyrics_prompt", "").strip()
+                query = lp if lp else p.get("style_prompt", "")
+                sample = create_sample(
+                    llm_handler  = llm_handler,
+                    query        = query,
+                    instrumental = instrumental,
+                )
+                if sample and sample.success:
+                    # Use the LM-generated lyrics. If instrumental, the LM will
+                    # have set lyrics="[Instrumental]" itself — trust that.
+                    # If vocal and the LM returned empty lyrics, use the scaffold
+                    # so the DiT still knows to generate a vocal track.
+                    lyrics_out = sample.lyrics or (
+                        "[Instrumental]" if instrumental else VOCAL_SCAFFOLD
+                    )
+                    base.update(f(
+                        caption        = sample.caption or p.get("style_prompt", ""),
+                        lyrics         = lyrics_out,
+                        bpm            = sample.bpm,
+                        keyscale       = sample.keyscale,
+                        vocal_language = sample.language,
+                    ))
+                else:
+                    emit({"type": "progress", "variation_index": variation_idx,
+                          "total_variations": total, "step": 9, "total_steps": 30,
+                          "message": "[warn] create_sample failed — using vocal scaffold"})
+                    base.update(f(
+                        caption = p.get("style_prompt", ""),
+                        lyrics  = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD,
+                    ))
+            except Exception as exc:
+                emit({"type": "progress", "variation_index": variation_idx,
+                      "total_variations": total, "step": 9, "total_steps": 30,
+                      "message": f"[warn] create_sample error ({exc}) — using vocal scaffold"})
+                base.update(f(
+                    caption = p.get("style_prompt", ""),
+                    lyrics  = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD,
+                ))
+        else:
+            # User-provided lyrics (or LLM unavailable).
+            # If user typed lyrics, use them. If user typed nothing but still
+            # wants vocals (with_vocals selected), use the scaffold so the DiT
+            # generates a vocal track rather than defaulting to instrumental.
+            # "[Instrumental]" is ACE-Step's convention for no-vocals generation.
+            user_lyrics = p.get("lyrics") or ""
+            if instrumental:
+                lyrics_out = "[Instrumental]"
+            elif user_lyrics:
+                lyrics_out = user_lyrics
+            else:
+                lyrics_out = VOCAL_SCAFFOLD
+            base.update(f(
+                caption = p.get("style_prompt", ""),
+                lyrics  = lyrics_out,
+            ))
 
     elif mode == "cover":
         base.update(f(
@@ -358,7 +438,7 @@ def _run_generation(p: dict, var_idx: int, total: int, seed: int,
 
     dit, llm = _get_handlers(p)
 
-    params = _make_params(p, seed, var_idx, total)
+    params = _make_params(p, seed, var_idx, total, llm_handler=llm)
     config = _make_config(p)
 
     Path(save_dir).mkdir(parents=True, exist_ok=True)

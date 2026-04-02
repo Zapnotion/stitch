@@ -229,8 +229,10 @@ class ACEStepV15:
         return self._run_worker({
             "mode":         "text",
             "style_prompt": request.style_prompt,
-            "lyrics":       request.user_lyrics,
-            "lyrics_mode":  request.lyrics_mode.value,
+            "lyrics":        request.user_lyrics,
+            "lyrics_mode":   request.lyrics_mode.value,
+            "lyrics_prompt": request.lyrics_prompt,
+            "output_type":   request.output_type.value,
             "duration":     request.duration_secs,
             "variations":   request.variations,
             "seed":         request.seed,

@@ -233,6 +233,21 @@ class GeneratePage(QWidget):
         # AI writes = v1.5 LLM plans lyrics via CoT; I provide = pass directly to DiT
         lay.addWidget(self._lyrics_mode_row)
 
+        # AI lyrics prompt box — shown when "AI writes" is selected.
+        # Tells the LM what to write about (theme, subject, mood, language).
+        # If left blank, the style prompt is used as the query instead.
+        self._ai_lyrics_prompt = QPlainTextEdit()
+        self._ai_lyrics_prompt.setObjectName("PromptBox")
+        self._ai_lyrics_prompt.setPlaceholderText(
+            "What should the AI sing about?\n"
+            "e.g. longing for someone far away, sung in English\n"
+            "e.g. a triumphant anthem about overcoming doubt\n"
+            "Leave blank to let the style prompt guide the lyrics."
+        )
+        self._ai_lyrics_prompt.setFixedHeight(90)
+        self._ai_lyrics_prompt.setVisible(True)   # AI writes is default
+        lay.addWidget(self._ai_lyrics_prompt)
+
         # User lyrics box — shown only when "I provide" is selected
         self._user_lyrics = QPlainTextEdit()
         self._user_lyrics.setObjectName("PromptBox")
@@ -243,11 +258,16 @@ class GeneratePage(QWidget):
         self._user_lyrics.setVisible(False)
         lay.addWidget(self._user_lyrics)
 
-        # Toggle user lyrics box based on pill selection
+        # Toggle lyrics boxes based on pill selection:
+        #   pill[0] = AI writes  → show ai_lyrics_prompt, hide user_lyrics
+        #   pill[1] = I provide  → hide ai_lyrics_prompt, show user_lyrics
+        #   pill[2] = Instrumental → hide both
         def _on_lyrics_pill():
             pills = self._lyrics_mode_row.findChildren(QPushButton)
-            show = len(pills) > 1 and pills[1].isChecked()
-            self._user_lyrics.setVisible(show)
+            ai_checked   = len(pills) > 0 and pills[0].isChecked()
+            user_checked = len(pills) > 1 and pills[1].isChecked()
+            self._ai_lyrics_prompt.setVisible(ai_checked)
+            self._user_lyrics.setVisible(user_checked)
         for btn in self._lyrics_mode_row.findChildren(QPushButton):
             btn.clicked.connect(_on_lyrics_pill)
 
@@ -501,6 +521,7 @@ class GeneratePage(QWidget):
             style_prompt  = self._style_prompt.toPlainText().strip(),
             lyrics_mode   = lyrics_mode,
             user_lyrics   = self._user_lyrics.toPlainText().strip(),
+            lyrics_prompt = self._ai_lyrics_prompt.toPlainText().strip(),
             output_type   = out_type,
             variations    = self._variations_spin.value(),
             duration_secs = self._duration_spin.value(),
