@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QStatusBar, QVBoxLayout, QWidget,
 )
 
-from app.backend.ace_step import ACEStepPipeline
+from app.backend.ace_step_v15 import ACEStepV15 as ACEStepPipeline
 from app.backend.separator import StemSeparator
 from app.backend.worker import ModelLoaderWorker
 from app.config import cfg
@@ -33,9 +33,8 @@ class MainWindow(QMainWindow):
 
         # Initialise backend
         self._pipeline  = ACEStepPipeline(
-            model_id   = cfg.ace_step_model,
-            device     = cfg.device,
             models_dir = str(cfg.models_dir),
+            device     = cfg.device,
         )
         self._separator = StemSeparator(
             device          = cfg.device,
@@ -237,12 +236,10 @@ class MainWindow(QMainWindow):
 
         demucs_str = "Stems ready" if self._separator.is_available else "No stem separator"
 
-        from app.config import cfg
-        ver_str = f"ACE-Step {cfg.ace_step_version}"
         if ok:
-            self._model_lbl.setText(f"● {ver_str} ready  ·  {demucs_str}  ·  {device_str}")
+            self._model_lbl.setText(f"● ACE-Step 1.5 ready  ·  {demucs_str}  ·  {device_str}")
         else:
-            self._model_lbl.setText(f"⚠ {ver_str} not installed (stub mode)  ·  {device_str}")
+            self._model_lbl.setText(f"⚠ ACE-Step 1.5 not available (stub mode)  ·  {device_str}")
 
     # -----------------------------------------------------------------------
     # VRAM polling

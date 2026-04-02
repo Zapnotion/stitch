@@ -3,13 +3,17 @@ backend/worker.py — QThread workers for all generation modes.
 
 All inference runs off the main thread so the UI stays responsive.
 Workers emit typed Qt signals back to the UI.
+
+For ACE-Step 1.5, the heavy lifting is done by the REST API server
+(managed by ACEStepV15). Workers just call the pipeline methods
+which communicate via HTTP — no subprocess worker script needed.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
-from app.backend.ace_step import ACEStepPipeline
+from app.backend.ace_step_v15 import ACEStepV15
 from app.backend.separator import StemSeparator
 from app.models.generation import (
     CoverRequest,
@@ -27,17 +31,17 @@ from app.models.generation import (
 
 class BaseWorker(QThread):
     progress = Signal(object)   # GenerationProgress
-    result   = Signal(object)   # list[GenerationResult] or GenerationResult
+    result   = Signal(object)   # list[GenerationResult]
     error    = Signal(str)
     done     = Signal()
 
 
 # ---------------------------------------------------------------------------
-# Text generation worker
+# Text generation
 # ---------------------------------------------------------------------------
 
 class TextGenerationWorker(BaseWorker):
-    def __init__(self, pipeline: ACEStepPipeline, request: TextGenerationRequest) -> None:
+    def __init__(self, pipeline: ACEStepV15, request: TextGenerationRequest) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._request  = request
@@ -56,11 +60,11 @@ class TextGenerationWorker(BaseWorker):
 
 
 # ---------------------------------------------------------------------------
-# Cover / restyle worker
+# Cover / restyle
 # ---------------------------------------------------------------------------
 
 class CoverWorker(BaseWorker):
-    def __init__(self, pipeline: ACEStepPipeline, request: CoverRequest) -> None:
+    def __init__(self, pipeline: ACEStepV15, request: CoverRequest) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._request  = request
@@ -79,11 +83,11 @@ class CoverWorker(BaseWorker):
 
 
 # ---------------------------------------------------------------------------
-# Vocal backing worker
+# Vocal backing
 # ---------------------------------------------------------------------------
 
 class VocalBackingWorker(BaseWorker):
-    def __init__(self, pipeline: ACEStepPipeline, request: VocalBackingRequest) -> None:
+    def __init__(self, pipeline: ACEStepV15, request: VocalBackingRequest) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._request  = request
@@ -102,11 +106,11 @@ class VocalBackingWorker(BaseWorker):
 
 
 # ---------------------------------------------------------------------------
-# Repair worker
+# Repair
 # ---------------------------------------------------------------------------
 
 class RepairWorker(BaseWorker):
-    def __init__(self, pipeline: ACEStepPipeline, request: RepairRequest) -> None:
+    def __init__(self, pipeline: ACEStepV15, request: RepairRequest) -> None:
         super().__init__()
         self._pipeline = pipeline
         self._request  = request
@@ -125,7 +129,7 @@ class RepairWorker(BaseWorker):
 
 
 # ---------------------------------------------------------------------------
-# Stem separation worker
+# Stem separation
 # ---------------------------------------------------------------------------
 
 class StemWorker(QThread):
@@ -133,12 +137,7 @@ class StemWorker(QThread):
     error       = Signal(str)
     done        = Signal()
 
-    def __init__(
-        self,
-        separator: StemSeparator,
-        audio_path: str,
-        job_id: str,
-    ) -> None:
+    def __init__(self, separator: StemSeparator, audio_path: str, job_id: str) -> None:
         super().__init__()
         self._separator  = separator
         self._audio_path = audio_path
@@ -158,22 +157,26 @@ class StemWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
-# Model loader worker
+# Model loader (starts the v1.5 API server)
 # ---------------------------------------------------------------------------
 
 class ModelLoaderWorker(QThread):
-    loaded  = Signal(bool)   # True = success
+    loaded  = Signal(bool)
     message = Signal(str)
     done    = Signal()
 
-    def __init__(self, pipeline: ACEStepPipeline) -> None:
+    def __init__(self, pipeline: ACEStepV15) -> None:
         super().__init__()
         self._pipeline = pipeline
 
     def run(self) -> None:
         try:
-            self.message.emit("Loading ACE-Step model…")
-            ok = self._pipeline.load()
+            self.message.emit("Starting ACE-Step 1.5 server…")
+
+            def _cb(p: GenerationProgress):
+                self.message.emit(p.message)
+
+            ok = self._pipeline.load(progress_cb=_cb)
             self.loaded.emit(ok)
         except Exception as exc:
             self.message.emit(f"Load failed: {exc}")

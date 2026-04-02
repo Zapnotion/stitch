@@ -55,7 +55,6 @@ _DEFAULTS: dict = {
     "default_variations": 1,
     "default_duration": 15,
     "default_sample_rate": 44100,
-    "ace_step_model": "ACE-Step/ACE-Step-v1-3.5B",
     "demucs_model": "htdemucs",
     "device": "auto",          # "auto" | "cuda" | "cpu"
     "output_format": "wav",    # "wav" | "mp3"
@@ -65,6 +64,7 @@ _DEFAULTS: dict = {
     "inputs_dir":  str(INPUTS_DIR),
     "models_dir":  str(MODELS_DIR),
     "stems_dir":   str(STEMS_DIR),
+    "lm_model":    "acestep-5Hz-lm-1.7B",
 }
 
 
@@ -148,12 +148,8 @@ class StitchConfig:
         return val
 
     @property
-    def ace_step_model(self) -> str:
-        return self._data.get("ace_step_model", _DEFAULTS["ace_step_model"])
-
-    @property
-    def ace_step_version(self) -> str:
-        return self._data.get("ace_step_version", "v1")
+    def lm_model(self) -> str:
+        return self._data.get("lm_model", _DEFAULTS["lm_model"])
 
     @property
     def demucs_model(self) -> str:

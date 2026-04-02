@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QVBoxLayout, QWidget,
 )
 
-from app.backend.ace_step import ACEStepPipeline
+from app.backend.ace_step_v15 import ACEStepV15 as ACEStepPipeline
 from app.backend.exporter import ExportWorker
 from app.backend.session import session
 from app.backend.worker import RepairWorker

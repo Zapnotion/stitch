@@ -47,9 +47,14 @@ if errorlevel 1 ( pause & exit /b 1 )
 :: 4+5. GPU torch + ACE-Step (handled by setup_model.py to avoid batch bugs)
 :: ---------------------------------------------------------------------------
 echo.
-echo  [Step 3/4] Checking ACE-Step ^& hardware...
+echo  [Step 3/4] Setting up ACE-Step 1.5 environment...
 python setup_model.py
-if errorlevel 2 (
+set SETUP_CODE=%ERRORLEVEL%
+if %SETUP_CODE% EQU 1 (
+    echo [ERROR] setup_model.py hit a fatal error - cannot continue.
+    pause & exit /b 1
+)
+if %SETUP_CODE% GEQ 2 (
     echo [WARN] ACE-Step unavailable - Stitch will run in STUB mode.
 )
 ::after_model_setup

@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from app.backend.ace_step import ACEStepPipeline
-from app.backend.demucs import DemucsSeparator
+from app.backend.ace_step_v15 import ACEStepV15 as ACEStepPipeline
+from app.backend.separator import StemSeparator as DemucsSeparator
 from app.backend.worker import (
     CoverWorker, StemWorker, TextGenerationWorker,
     VocalBackingWorker,
@@ -230,6 +230,7 @@ class GeneratePage(QWidget):
 
         lay.addWidget(self._field_label("Lyrics"))
         self._lyrics_mode_row = self._pill_row(["AI writes", "I provide", "Instrumental"])
+        # AI writes = v1.5 LLM plans lyrics via CoT; I provide = pass directly to DiT
         lay.addWidget(self._lyrics_mode_row)
 
         # User lyrics box — shown only when "I provide" is selected
