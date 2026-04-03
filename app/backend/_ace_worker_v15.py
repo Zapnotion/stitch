@@ -219,52 +219,90 @@ def _get_handlers(p: dict):
     )
 
     # ---- LLM handler ----
-    # 'pt' backend: standard PyTorch inference — works everywhere including Windows.
-    # 'vllm' backend: faster but requires flash-attn + Linux CUDA.
-    # We default to 'pt' on Windows and let the user override via env var.
+    # On Windows with 'pt' backend:
+    #   - 1.7B hangs during weight loading (no Triton/CUDA graphs, loads
+    #     layer-by-layer into VRAM and can take 20+ minutes or stall forever)
+    #   - 0.6B loads reliably in ~30s and produces good lyrics
+    # Use 0.6B as the safe default on Windows; allow override via env var.
     lm_backend = os.environ.get("ACESTEP_LM_BACKEND", "")
     if not lm_backend:
         lm_backend = "pt" if sys.platform == "win32" else "vllm"
 
-    # LM model path — respect ACESTEP_LM_MODEL_PATH env var, default to 1.7B
-    lm_model = os.environ.get("ACESTEP_LM_MODEL_PATH", "acestep-5Hz-lm-1.7B")
+    lm_model_env = os.environ.get("ACESTEP_LM_MODEL_PATH", "")
+    if lm_model_env:
+        lm_model = lm_model_env
+    elif sys.platform == "win32" and lm_backend == "pt":
+        # 0.6B is the safe choice for Windows pt backend — reliably loads in ~30s
+        lm_model = "acestep-5Hz-lm-0.6B"
+    else:
+        lm_model = "acestep-5Hz-lm-1.7B"
 
-    progress(1, 5, 10, f"Initialising LLM ({lm_model}, backend={lm_backend})...")
+    # LLM init timeout — if initialize() doesn't return within this many seconds
+    # we abandon it and run in DiT-only mode (no AI lyrics, but generation works).
+    # 180s default: 0.6B loads in ~30s normally, but needs ~90s on first run
+    # (tokenizer download). 1.7B on pt backend may never finish — it will always
+    # hit this timeout, which is intentional. Generation still succeeds without it.
+    LLM_INIT_TIMEOUT = int(os.environ.get("STITCH_LLM_TIMEOUT", "180"))
 
-    # ACESTEP_INIT_LLM controls whether LLM initialises at startup.
-    # 'auto' = init if enough VRAM, 'always' = always init, 'never' = skip.
-    # We set 'auto' so it won't crash on low-VRAM machines.
+    progress(1, 5, 10,
+             f"Initialising LLM ({lm_model}, backend={lm_backend}, timeout={LLM_INIT_TIMEOUT}s)...")
+
     os.environ.setdefault("ACESTEP_INIT_LLM", "auto")
 
     llm = LLMHandler()
-    try:
-        # initialize() returns (status_msg, success) — must check success flag
-        init_result = llm.initialize(
-            checkpoint_dir=project_root,
-            lm_model_path=lm_model,
-            backend=lm_backend,
-            device=device,
-        )
-        # Handle both old (no return) and new (status_msg, success) signatures
+    llm_result = [None]   # [0] = result or exception, captured from thread
+    llm_exc    = [None]
+
+    def _init_llm():
+        try:
+            r = llm.initialize(
+                checkpoint_dir=project_root,
+                lm_model_path=lm_model,
+                backend=lm_backend,
+                device=device,
+            )
+            llm_result[0] = r
+        except Exception as e:
+            llm_exc[0] = e
+
+    t = threading.Thread(target=_init_llm, daemon=True)
+    t.start()
+    t.join(timeout=LLM_INIT_TIMEOUT)
+
+    if t.is_alive():
+        # Still running after timeout — the pt backend hung loading weights.
+        # We cannot kill the thread cleanly, but we abandon it and continue.
+        # IMPORTANT: Generation will still complete — just without AI lyrics.
+        # The CoT/thinking flags are NOT passed when llm=None, so there is no
+        # secondary hang during generate_music().
+        emit({"type": "error",
+              "message": f"[LLM init timed out after {LLM_INIT_TIMEOUT}s]\n"
+                         f"The {lm_model} model did not finish loading.\n"
+                         f"Continuing in DiT-only mode — music will still generate,\n"
+                         f"but lyrics will use a structural scaffold instead of AI-written text.\n"
+                         f"Tip: switch to the 0.6B model in Settings → Models for faster LLM loading."})
+        llm = None
+    elif llm_exc[0] is not None:
+        import traceback as tb
+        emit({"type": "error",
+              "message": f"[LLM init failed] {type(llm_exc[0]).__name__}: {llm_exc[0]}\n"
+                         f"AI Writes lyrics disabled this session.\n"
+                         f"{tb.format_exc()}"})
+        llm = None
+    else:
+        init_result = llm_result[0]
         if isinstance(init_result, tuple):
             status_msg, init_ok = init_result
         else:
             init_ok = True
             status_msg = "ok"
         if init_ok:
-            progress(1, 8, 10, f"LLM ready ({lm_model}): {status_msg}")
+            progress(1, 8, 10, f"LLM ready ({lm_model})")
         else:
             emit({"type": "error",
-                  "message": f"[LLM init failed] initialize() returned success=False: {status_msg}\n"
-                              f"AI Writes lyrics will NOT work this session."})
+                  "message": f"[LLM init failed] success=False: {status_msg}\n"
+                              f"AI Writes lyrics disabled this session."})
             llm = None
-    except Exception as exc:
-        import traceback
-        emit({"type": "error",
-              "message": f"[LLM init failed] {type(exc).__name__}: {exc}\n"
-                         f"AI Writes lyrics will NOT work this session.\n"
-                         f"Traceback:\n{traceback.format_exc()}"})
-        llm = None
 
     _dit_handler = dit
     _llm_handler = llm
@@ -439,22 +477,33 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
             repaint_end      = float(p.get("region_end", 30.0)),
         ))
 
-    # Infer steps — turbo default is 8, base default is 32
+    # Infer steps — turbo default is 8, base default is 32.
+    # Turbo was designed for low step counts; 8 steps is optimal.
+    # More steps waste VRAM and time without quality gain on turbo.
     config_path = _select_config(p)
-    default_steps = 8 if "turbo" in config_path else 32
-    base.update(f(infer_step=p.get("infer_steps", default_steps)))
+    is_turbo = "turbo" in config_path
+    default_steps = 8 if is_turbo else 32
+    infer_steps = int(p.get("infer_steps", default_steps))
+    base.update(f(infer_step=infer_steps))
+
+    # For turbo: guidance_scale must be 1.0 (no CFG).
+    # ACEStep overrides this internally anyway, but setting it explicitly
+    # avoids entering the CFG path before the override kicks in.
+    if is_turbo:
+        base.update(f(guidance_scale=1.0))
 
     # thinking=True enables ACE-Step's internal LLM chain-of-thought pipeline.
-    # This is what drives the LLM to enrich caption and generate lyrics internally
-    # during generate_music(). Without it, llm_initialized=False causes use_lm=False
-    # regardless of whether we successfully initialised our LLMHandler.
-    # Only meaningful for text mode — cover/repair use their own pipelines.
-    if mode == "text" and lyrics_mode != "instrumental":
+    # CRITICAL: Only set this when the LLM handler is actually initialised.
+    # If thinking=True but llm_initialized=False, ACEStep enters a CoT stall
+    # that runs for the full 600s generation timeout before failing. This was
+    # the root cause of the "GPU inflates then hangs forever" symptom.
+    llm_available = llm_handler is not None
+    if mode == "text" and lyrics_mode != "instrumental" and llm_available:
         base.update(f(
-            thinking        = True,
-            use_cot_caption = True,
-            use_cot_metas   = True,
-            use_cot_language = (not instrumental),  # skip language CoT for instrumental
+            thinking         = True,
+            use_cot_caption  = True,
+            use_cot_metas    = True,
+            use_cot_language = (not instrumental),
         ))
 
     return GenerationParams(**base)
@@ -521,10 +570,63 @@ def _run_generation(p: dict, var_idx: int, total: int, seed: int,
 # Mode runners
 # ---------------------------------------------------------------------------
 
+def _generate_lyrics_pre(p: dict) -> None:
+    """
+    Generate lyrics BEFORE the heavy DiT model loads — zero VRAM, fast.
+    Writes result back into p["lyrics"] so _make_params picks it up as
+    user-supplied lyrics (bypassing the broken ACEStep LLM path entirely).
+
+    Only runs when lyrics_mode=ai_writes and no user lyrics are provided.
+    Skipped for instrumental output.
+    """
+    lyrics_mode = p.get("lyrics_mode", "ai_writes")
+    output_type = p.get("output_type", "with_vocals")
+    user_lyrics = (p.get("lyrics") or "").strip()
+
+    if lyrics_mode != "ai_writes":
+        return  # user supplied their own lyrics
+    if output_type == "instrumental":
+        return  # no lyrics needed
+    if user_lyrics:
+        return  # already have lyrics
+
+    try:
+        # lyrics_gen lives in the UI venv — import from source tree
+        _root = Path(__file__).parent.parent.parent
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
+        from app.backend.lyrics_gen import generate_lyrics
+
+        style  = p.get("style_prompt", "")
+        lp     = p.get("lyrics_prompt", "")
+
+        def _cb(msg: str):
+            progress(1, 1, TOTAL_STEPS, msg)
+
+        lyrics = generate_lyrics(
+            style_prompt  = style,
+            lyrics_prompt = lp,
+            progress_cb   = _cb,
+        )
+
+        if lyrics and lyrics.strip():
+            p["lyrics"]      = lyrics
+            p["lyrics_mode"] = "user"   # tell _make_params to use them directly
+    except Exception as exc:
+        import traceback
+        emit({"type": "error",
+              "message": f"[lyrics_gen] {type(exc).__name__}: {exc}\n"
+                         f"{traceback.format_exc()}\nUsing scaffold fallback."})
+
+
 def run_text(p: dict) -> None:
     total = p.get("variations", 1)
     out_dir = p["output_dir"]
 
+    # Step 1: Generate lyrics before loading the heavy model (fast, zero VRAM)
+    _generate_lyrics_pre(p)
+
+    # Step 2: Load DiT (the only heavy step)
     with HeartbeatThread(1, total, 0, 10, TOTAL_STEPS,
                          lambda t: f"Loading model... ({int(t)}s)"):
         _get_handlers(p)

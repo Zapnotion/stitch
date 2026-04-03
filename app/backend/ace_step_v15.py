@@ -61,8 +61,10 @@ class ACEStepV15:
     """
 
     def __init__(self, models_dir: str, device: str = "auto") -> None:
+        from app.config import cfg
         self.models_dir = models_dir
         self.device     = device
+        self.lm_model   = cfg.lm_model
         self._python    = _find_v15_python()
         self._loaded    = False
 
@@ -133,7 +135,8 @@ class ACEStepV15:
 
         payload_json = json.dumps(payload)
         env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
-               "PYTHONUNBUFFERED": "1"}
+               "PYTHONUNBUFFERED": "1",
+               "ACESTEP_LM_MODEL_PATH": self.lm_model}
         results: list[GenerationResult] = []
 
         try:

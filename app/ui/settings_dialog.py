@@ -116,11 +116,16 @@ class SettingsDialog(QDialog):
 
         self._lm_model = QComboBox()
         self._lm_model.addItems([
-            "acestep-5Hz-lm-1.7B",   # best quality — recommended for 4080
-            "acestep-5Hz-lm-0.6B",   # faster, lower quality
-            "acestep-5Hz-lm-4B",     # highest quality, needs 16+ GB VRAM
+            "acestep-5Hz-lm-0.6B",   # recommended for Windows — loads reliably
+            "acestep-5Hz-lm-1.7B",   # better quality, may hang on Windows/pt backend
+            "acestep-5Hz-lm-4B",     # highest quality, needs 24+ GB VRAM
         ])
-        self._lm_model.setToolTip("LM model controls lyric generation and song structure planning.")
+        self._lm_model.setToolTip(
+            "LM model for AI lyric generation.\n"
+            "0.6B: Recommended for Windows — fast and reliable.\n"
+            "1.7B: Better quality but can hang on Windows without Triton.\n"
+            "4B: Highest quality, needs 24+ GB VRAM."
+        )
         form.addRow("ACE-Step LM model:", self._lm_model)
 
         self._demucs_model = QComboBox()
@@ -130,7 +135,7 @@ class SettingsDialog(QDialog):
         info = QLabel(
             "ACE-Step 1.5 uses a hybrid LM+DiT architecture for Suno-quality output.\n"
             "Models download automatically on first generation (~7 GB total).\n\n"
-            "1.7B LM is recommended for RTX 4080. Use 0.6B if VRAM is low. "
+            "0.6B LM is recommended on Windows — it loads reliably in ~30s. ""1.7B produces better lyrics but can hang during loading on Windows. "
             "Changes take effect after restarting Stitch."
         )
         info.setObjectName("InfoBox")
@@ -205,7 +210,7 @@ class SettingsDialog(QDialog):
         self._models_dir.setText(str(cfg.models_dir))
         self._stems_dir.setText(str(cfg.stems_dir))
 
-        lm_idx = self._lm_model.findText(cfg.get('lm_model', 'acestep-5Hz-lm-1.7B'))
+        lm_idx = self._lm_model.findText(cfg.get('lm_model', 'acestep-5Hz-lm-0.6B'))
         if lm_idx >= 0: self._lm_model.setCurrentIndex(lm_idx)
         idx = self._demucs_model.findText(cfg.demucs_model)
         if idx >= 0:
