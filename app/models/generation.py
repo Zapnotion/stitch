@@ -43,16 +43,19 @@ class RepairMode(str, Enum):
 
 @dataclass
 class TextGenerationRequest:
-    style_prompt:  str
-    output_type:   OutputType        = OutputType.WITH_VOCALS
-    lyrics_mode:   LyricsMode        = LyricsMode.AI_WRITES
-    user_lyrics:   str               = ""
-    lyrics_prompt: str               = ""   # AI writes: what to sing about
-    duration_secs: int               = 30
-    variations:    int               = 4
-    seed:          Optional[int]     = None
-    lora:          Optional[str]     = None
-    output_dir:    str               = ""   # resolved by caller from cfg
+    style_prompt:      str
+    output_type:       OutputType        = OutputType.WITH_VOCALS
+    lyrics_mode:       LyricsMode        = LyricsMode.AI_WRITES
+    user_lyrics:       str               = ""
+    lyrics_prompt:     str               = ""    # AI writes: what to sing about
+    lyrics_creativity: float             = 0.5   # 0.0=safe/predictable, 1.0=wild
+    lyrics_adherence:  float             = 0.7   # 0.0=loose, 1.0=tight on topic
+    lyrics_model:      str               = ""    # key from LYRICS_MODELS; ""=default
+    duration_secs:     int               = 30
+    variations:        int               = 4
+    seed:              Optional[int]     = None
+    lora:              Optional[str]     = None
+    output_dir:        str               = ""    # resolved by caller from cfg
 
 
 @dataclass

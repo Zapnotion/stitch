@@ -597,8 +597,12 @@ def _generate_lyrics_pre(p: dict) -> None:
             sys.path.insert(0, str(_root))
         from app.backend.lyrics_gen import generate_lyrics
 
-        style  = p.get("style_prompt", "")
-        lp     = p.get("lyrics_prompt", "")
+        style      = p.get("style_prompt", "")
+        lp         = p.get("lyrics_prompt", "")
+        creativity = float(p.get("lyrics_creativity", 0.5))
+        adherence  = float(p.get("lyrics_adherence",  0.7))
+        lyr_model  = p.get("lyrics_model", "")
+        models_dir = Path(p["models_dir"]) if p.get("models_dir") else None
 
         def _cb(msg: str):
             progress(1, 1, TOTAL_STEPS, msg)
@@ -606,7 +610,11 @@ def _generate_lyrics_pre(p: dict) -> None:
         lyrics = generate_lyrics(
             style_prompt  = style,
             lyrics_prompt = lp,
+            models_dir    = models_dir,
             progress_cb   = _cb,
+            creativity    = creativity,
+            adherence     = adherence,
+            lyrics_model  = lyr_model,
         )
 
         if lyrics and lyrics.strip():

@@ -36,6 +36,51 @@ call :setup_venv ".venv" "requirements.txt"
 if errorlevel 1 ( pause & exit /b 1 )
 
 :: ---------------------------------------------------------------------------
+:: 2b. llama-cpp-python (offline lyrics LLM — CPU or CUDA wheel)
+:: ---------------------------------------------------------------------------
+echo.
+echo  [Step 1b/4] Checking llama-cpp-python (offline lyrics engine)...
+set "VENV_PY=.venv\Scripts\python.exe"
+
+:: Check if already installed
+"%VENV_PY%" -c "import llama_cpp" >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] llama-cpp-python already installed
+    goto :llama_done
+)
+
+:: Detect CUDA availability via torch (already installed in the venv)
+set CUDA_AVAILABLE=0
+"%VENV_PY%" -c "import torch; exit(0 if torch.cuda.is_available() else 1)" >nul 2>&1
+if not errorlevel 1 set CUDA_AVAILABLE=1
+
+if "%CUDA_AVAILABLE%"=="1" (
+    echo [..] GPU detected - installing llama-cpp-python with CUDA support...
+    echo      This may take a minute on first run.
+    set "CMAKE_ARGS=-DGGML_CUDA=on"
+    set "FORCE_CMAKE=1"
+    "%VENV_PY%" -m pip install llama-cpp-python --upgrade --quiet ^
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+    if errorlevel 1 (
+        echo [WARN] CUDA llama-cpp-python failed - falling back to CPU wheel...
+        "%VENV_PY%" -m pip install llama-cpp-python --upgrade --quiet
+    )
+) else (
+    echo [..] No GPU - installing CPU-only llama-cpp-python...
+    "%VENV_PY%" -m pip install llama-cpp-python --upgrade --quiet
+)
+
+"%VENV_PY%" -c "import llama_cpp" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] llama-cpp-python install failed.
+    echo        AI lyrics will use the built-in template fallback until fixed.
+) else (
+    echo [OK] llama-cpp-python ready
+)
+
+:llama_done
+
+:: ---------------------------------------------------------------------------
 :: 3. Model venv (.venv_model)
 :: ---------------------------------------------------------------------------
 echo.
@@ -65,7 +110,7 @@ if %SETUP_CODE% GEQ 2 (
 set "APP_DATA=%APPDATA%\stitch"
 for %%D in (
     "%APP_DATA%" "%APP_DATA%\outputs" "%APP_DATA%\inputs"
-    "%APP_DATA%\models" "%APP_DATA%\models\loras"
+    "%APP_DATA%\models" "%APP_DATA%\models\loras" "%APP_DATA%\models\lyrics_models"
     "%APP_DATA%\stems" "%APP_DATA%\presets" "%APP_DATA%\logs"
 ) do ( if not exist %%D mkdir %%D >nul 2>&1 )
 echo [OK] App data: %APP_DATA%

@@ -65,6 +65,7 @@ _DEFAULTS: dict = {
     "models_dir":  str(MODELS_DIR),
     "stems_dir":   str(STEMS_DIR),
     "lm_model":    "acestep-5Hz-lm-1.7B",
+    "lyrics_model": "",   # key from LYRICS_MODELS in lyrics_gen.py; ""=use default (CPU 1.5B)
 }
 
 

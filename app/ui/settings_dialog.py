@@ -110,18 +110,23 @@ class SettingsDialog(QDialog):
 
     def _build_model_tab(self) -> QWidget:
         w = QWidget()
-        form = QFormLayout(w)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        form = QFormLayout(inner)
         form.setContentsMargins(16, 16, 16, 16)
         form.setSpacing(10)
 
+        # --- ACE-Step LM ---
         self._lm_model = QComboBox()
         self._lm_model.addItems([
-            "acestep-5Hz-lm-0.6B",   # recommended for Windows — loads reliably
-            "acestep-5Hz-lm-1.7B",   # better quality, may hang on Windows/pt backend
-            "acestep-5Hz-lm-4B",     # highest quality, needs 24+ GB VRAM
+            "acestep-5Hz-lm-0.6B",
+            "acestep-5Hz-lm-1.7B",
+            "acestep-5Hz-lm-4B",
         ])
         self._lm_model.setToolTip(
-            "LM model for AI lyric generation.\n"
+            "LM model used inside ACE-Step for caption/lyric planning.\n"
             "0.6B: Recommended for Windows — fast and reliable.\n"
             "1.7B: Better quality but can hang on Windows without Triton.\n"
             "4B: Highest quality, needs 24+ GB VRAM."
@@ -132,17 +137,123 @@ class SettingsDialog(QDialog):
         self._demucs_model.addItems(["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx_extra"])
         form.addRow("Demucs model (stem fallback):", self._demucs_model)
 
-        info = QLabel(
-            "ACE-Step 1.5 uses a hybrid LM+DiT architecture for Suno-quality output.\n"
-            "Models download automatically on first generation (~7 GB total).\n\n"
-            "0.6B LM is recommended on Windows — it loads reliably in ~30s. ""1.7B produces better lyrics but can hang during loading on Windows. "
-            "Changes take effect after restarting Stitch."
-        )
-        info.setObjectName("InfoBox")
-        info.setWordWrap(True)
-        form.addRow(info)
+        form.addRow(self._divider())
 
+        # --- Lyrics Model (offline GGUF) ---
+        lyr_hdr = QLabel("Lyrics Generation Model")
+        lyr_hdr.setObjectName("GroupLabel")
+        form.addRow(lyr_hdr)
+
+        from app.backend.lyrics_gen import LYRICS_MODELS, LYRICS_MODEL_NAMES, DEFAULT_LYRICS_MODEL
+        from app.config import cfg as _cfg
+
+        self._lyrics_model = QComboBox()
+        self._lyrics_model.addItems(LYRICS_MODEL_NAMES)
+        self._lyrics_model.setToolTip(
+            "Offline GGUF model used for AI lyric writing.\n\n"
+            "CPU-friendly (1.5B): ~1 GB download. Zero VRAM. Good for low-end PCs.\n"
+            "Balanced (3B): ~2 GB. Optional partial GPU offload (~1 GB VRAM).\n"
+            "GPU-assisted (7B): ~4.5 GB. ~3–4 GB VRAM. Best lyric quality.\n\n"
+            "Downloads once into your Models cache folder. Falls back to built-in\n"
+            "templates until the model has been downloaded."
+        )
+        form.addRow("Lyrics model:", self._lyrics_model)
+
+        # Download status + button row
+        self._lyr_status = QLabel("Checking…")
+        self._lyr_status.setObjectName("FieldLabelDim")
+        self._lyr_status.setWordWrap(True)
+
+        self._lyr_download_btn = QPushButton("Download selected model")
+        self._lyr_download_btn.setObjectName("ActionBtn")
+        self._lyr_download_btn.clicked.connect(self._on_download_lyrics_model)
+
+        lyr_row = QHBoxLayout()
+        lyr_row.addWidget(self._lyr_status, 1)
+        lyr_row.addWidget(self._lyr_download_btn)
+        form.addRow(lyr_row)
+
+        lyr_info = QLabel(
+            "Models download from HuggingFace on first use (or via the button above).\n"
+            "Stored in your Models cache folder. All inference runs fully offline.\n"
+            "The Creativity and Topic adherence sliders appear on the Generate tab\n"
+            "when 'AI writes' lyrics mode is selected."
+        )
+        lyr_info.setObjectName("InfoBox")
+        lyr_info.setWordWrap(True)
+        form.addRow(lyr_info)
+
+        form.addRow(self._divider())
+
+        ace_info = QLabel(
+            "ACE-Step 1.5 uses a hybrid LM+DiT architecture.\n"
+            "Models auto-download on first generation (~7 GB total).\n"
+            "Changes to ACE-Step LM take effect after restarting Stitch."
+        )
+        ace_info.setObjectName("InfoBox")
+        ace_info.setWordWrap(True)
+        form.addRow(ace_info)
+
+        scroll.setWidget(inner)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        # Refresh status whenever the combo changes
+        self._lyrics_model.currentTextChanged.connect(self._refresh_lyr_status)
         return w
+
+    def _refresh_lyr_status(self, model_name: str = "") -> None:
+        """Update the download-status label for the currently selected lyrics model."""
+        try:
+            from app.backend.lyrics_gen import LYRICS_MODELS, _model_path
+            name = model_name or self._lyrics_model.currentText()
+            info = LYRICS_MODELS.get(name, {})
+            local = _model_path(name, cfg.models_dir)
+            if local is not None:
+                size_mb = local.stat().st_size // (1024 * 1024)
+                self._lyr_status.setText(f"✓ Downloaded ({size_mb} MB)")
+                self._lyr_download_btn.setText("Re-download")
+            else:
+                repo = info.get("repo", "")
+                self._lyr_status.setText(f"Not downloaded · {repo}")
+                self._lyr_download_btn.setText("Download selected model")
+        except Exception:
+            self._lyr_status.setText("Status unavailable")
+
+    def _on_download_lyrics_model(self) -> None:
+        """Kick off a lyrics model download in a background thread."""
+        from PySide6.QtCore import QThread, Signal as Sig
+
+        name = self._lyrics_model.currentText()
+        self._lyr_download_btn.setEnabled(False)
+        self._lyr_status.setText("Downloading…")
+
+        class _DownloadThread(QThread):
+            finished = Sig(bool, str)   # (success, message)
+            def __init__(self, n, d):
+                super().__init__()
+                self._n = n; self._d = d
+            def run(self):
+                try:
+                    from app.backend.lyrics_gen import download_lyrics_model
+                    path = download_lyrics_model(self._n, self._d)
+                    if path:
+                        self.finished.emit(True, f"✓ Downloaded to {path.name}")
+                    else:
+                        self.finished.emit(False, "Download failed — check logs")
+                except Exception as exc:
+                    self.finished.emit(False, str(exc))
+
+        def _done(ok: bool, msg: str):
+            self._lyr_status.setText(msg)
+            self._lyr_download_btn.setEnabled(True)
+            self._lyr_download_btn.setText("Download selected model")
+            self._refresh_lyr_status()
+
+        self._dl_thread = _DownloadThread(name, cfg.models_dir)
+        self._dl_thread.finished.connect(_done)
+        self._dl_thread.start()
 
     def _build_export_tab(self) -> QWidget:
         w = QWidget()
@@ -216,6 +327,11 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self._demucs_model.setCurrentIndex(idx)
 
+        lyr_idx = self._lyrics_model.findText(cfg.get("lyrics_model", ""))
+        if lyr_idx >= 0:
+            self._lyrics_model.setCurrentIndex(lyr_idx)
+        self._refresh_lyr_status()
+
         fmt_idx = self._output_format.findText(cfg.output_format)
         if fmt_idx >= 0:
             self._output_format.setCurrentIndex(fmt_idx)
@@ -235,6 +351,7 @@ class SettingsDialog(QDialog):
             "stems_dir":           self._stems_dir.text(),
             "lm_model":            self._lm_model.currentText(),
             "demucs_model":        self._demucs_model.currentText(),
+            "lyrics_model":        self._lyrics_model.currentText(),
             "output_format":       self._output_format.currentText(),
             "mp3_bitrate":         int(self._mp3_bitrate.currentText()),
         }

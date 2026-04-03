@@ -248,6 +248,76 @@ class GeneratePage(QWidget):
         self._ai_lyrics_prompt.setVisible(True)   # AI writes is default
         lay.addWidget(self._ai_lyrics_prompt)
 
+        # --- AI writes controls (creativity + adherence sliders) ---
+        # Shown only when "AI writes" pill is active.
+        self._ai_controls = QWidget()
+        self._ai_controls.setObjectName("AIControlsBox")
+        ai_lay = QVBoxLayout(self._ai_controls)
+        ai_lay.setContentsMargins(0, 4, 0, 0)
+        ai_lay.setSpacing(6)
+
+        def _slider_row(label_left: str, label_right: str,
+                        lo: int, hi: int, val: int) -> tuple:
+            """Return (container_widget, QSlider, value_label)."""
+            row_w = QWidget()
+            row_l = QVBoxLayout(row_w)
+            row_l.setContentsMargins(0, 0, 0, 0)
+            row_l.setSpacing(2)
+
+            # Top row: left label + value + right label
+            hdr = QHBoxLayout()
+            lbl_l = QLabel(label_left)
+            lbl_l.setObjectName("FieldLabel")
+            lbl_r = QLabel(label_right)
+            lbl_r.setObjectName("FieldLabelDim")
+            val_lbl = QLabel(f"{val / 10:.1f}")
+            val_lbl.setObjectName("SliderValue")
+            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            hdr.addWidget(lbl_l)
+            hdr.addStretch()
+            hdr.addWidget(val_lbl)
+            row_l.addLayout(hdr)
+
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(lo, hi)
+            slider.setValue(val)
+            slider.setObjectName("LyricsSlider")
+            slider.valueChanged.connect(
+                lambda v, vl=val_lbl: vl.setText(f"{v / 10:.1f}")
+            )
+            row_l.addWidget(slider)
+
+            # Bottom hint row
+            hint_row = QHBoxLayout()
+            hl = QLabel(label_left.split(" ")[0])
+            hl.setObjectName("SliderHint")
+            hr = QLabel(label_right.split(" ")[0])
+            hr.setObjectName("SliderHint")
+            hint_row.addWidget(hl)
+            hint_row.addStretch()
+            hint_row.addWidget(hr)
+            row_l.addLayout(hint_row)
+
+            return row_w, slider, val_lbl
+
+        creativity_w, self._creativity_slider, self._creativity_val = _slider_row(
+            "Safe", "Wild", 0, 10, 5   # default 0.5
+        )
+        creativity_label = QLabel("Creativity")
+        creativity_label.setObjectName("FieldLabel")
+        ai_lay.addWidget(creativity_label)
+        ai_lay.addWidget(creativity_w)
+
+        adherence_w, self._adherence_slider, self._adherence_val = _slider_row(
+            "Loose", "Strict", 0, 10, 7   # default 0.7
+        )
+        adherence_label = QLabel("Topic adherence")
+        adherence_label.setObjectName("FieldLabel")
+        ai_lay.addWidget(adherence_label)
+        ai_lay.addWidget(adherence_w)
+
+        lay.addWidget(self._ai_controls)
+
         # User lyrics box — shown only when "I provide" is selected
         self._user_lyrics = QPlainTextEdit()
         self._user_lyrics.setObjectName("PromptBox")
@@ -258,15 +328,16 @@ class GeneratePage(QWidget):
         self._user_lyrics.setVisible(False)
         lay.addWidget(self._user_lyrics)
 
-        # Toggle lyrics boxes based on pill selection:
-        #   pill[0] = AI writes  → show ai_lyrics_prompt, hide user_lyrics
-        #   pill[1] = I provide  → hide ai_lyrics_prompt, show user_lyrics
-        #   pill[2] = Instrumental → hide both
+        # Toggle lyrics boxes + AI controls based on pill selection:
+        #   pill[0] = AI writes  → show ai_lyrics_prompt + ai_controls, hide user_lyrics
+        #   pill[1] = I provide  → hide ai_lyrics_prompt + ai_controls, show user_lyrics
+        #   pill[2] = Instrumental → hide all
         def _on_lyrics_pill():
             pills = self._lyrics_mode_row.findChildren(QPushButton)
             ai_checked   = len(pills) > 0 and pills[0].isChecked()
             user_checked = len(pills) > 1 and pills[1].isChecked()
             self._ai_lyrics_prompt.setVisible(ai_checked)
+            self._ai_controls.setVisible(ai_checked)
             self._user_lyrics.setVisible(user_checked)
         for btn in self._lyrics_mode_row.findChildren(QPushButton):
             btn.clicked.connect(_on_lyrics_pill)
@@ -518,16 +589,19 @@ class GeneratePage(QWidget):
         ) else OutputType.WITH_VOCALS
 
         req = TextGenerationRequest(
-            style_prompt  = self._style_prompt.toPlainText().strip(),
-            lyrics_mode   = lyrics_mode,
-            user_lyrics   = self._user_lyrics.toPlainText().strip(),
-            lyrics_prompt = self._ai_lyrics_prompt.toPlainText().strip(),
-            output_type   = out_type,
-            variations    = self._variations_spin.value(),
-            duration_secs = self._duration_spin.value(),
-            seed          = seed,
-            lora          = None if lora_val == "None" else str(cfg.models_dir / "loras" / lora_val),
-            output_dir    = str(cfg.outputs_dir),
+            style_prompt       = self._style_prompt.toPlainText().strip(),
+            lyrics_mode        = lyrics_mode,
+            user_lyrics        = self._user_lyrics.toPlainText().strip(),
+            lyrics_prompt      = self._ai_lyrics_prompt.toPlainText().strip(),
+            lyrics_creativity  = self._creativity_slider.value() / 10.0,
+            lyrics_adherence   = self._adherence_slider.value()  / 10.0,
+            lyrics_model       = cfg.get("lyrics_model", ""),
+            output_type        = out_type,
+            variations         = self._variations_spin.value(),
+            duration_secs      = self._duration_spin.value(),
+            seed               = seed,
+            lora               = None if lora_val == "None" else str(cfg.models_dir / "loras" / lora_val),
+            output_dir         = str(cfg.outputs_dir),
         )
         self._gen_btn.setEnabled(False)
         self._gen_btn.setText("Generating…")

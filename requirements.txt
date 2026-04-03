@@ -6,3 +6,4 @@ demucs>=4.0.0
 pydub>=0.25.1
 huggingface_hub>=0.20.0
 audio-separator[gpu]>=0.27.0
+# llama-cpp-python is installed separately by run.bat (needs CUDA flag handling)
