@@ -290,7 +290,79 @@ def ensure_ace_step_v15() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Step 5: audio-separator in UI venv for stems
+# Step 5: ACE-Step LM model download
+# ---------------------------------------------------------------------------
+
+# The LM model is required for AI lyrics generation ("AI writes" mode).
+# It is separate from the DiT checkpoint and must be downloaded to the
+# Stitch models directory where LLMHandler.initialize() will find it.
+LM_MODEL_NAME = "acestep-5Hz-lm-1.7B"
+LM_HF_REPO    = "ACE-Step/Ace-Step1.5"
+
+def _get_stitch_models_dir() -> Path:
+    """Return the Stitch models directory (%APPDATA%/stitch/models on Windows)."""
+    import os
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+    return Path(base) / "stitch" / "models"
+
+
+def ensure_lm_model() -> None:
+    """Download the ACE-Step LM model if not already present."""
+    models_dir = _get_stitch_models_dir()
+    lm_dir = models_dir / LM_MODEL_NAME
+
+    # Check if already downloaded — look for the config file as a marker
+    if (lm_dir / "config.json").exists():
+        print(f"[OK] LM model already present ({LM_MODEL_NAME})")
+        return
+
+    print(f"[..] Downloading LM model ({LM_MODEL_NAME})...")
+    print(f"     This enables AI lyrics generation (may take several minutes)")
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    vpy = str(VENV_PY)
+    # Use huggingface_hub to download just the LM subfolder from the repo
+    dl_code = f"""
+import sys
+from huggingface_hub import snapshot_download
+from pathlib import Path
+try:
+    snapshot_download(
+        repo_id="{LM_HF_REPO}",
+        allow_patterns=["{LM_MODEL_NAME}/*"],
+        local_dir=str(Path(r"{models_dir}")),
+        local_dir_use_symlinks=False,
+    )
+    lm_path = Path(r"{lm_dir}")
+    if lm_path.exists():
+        print("OK")
+    else:
+        print("MISSING")
+        sys.exit(1)
+except Exception as e:
+    print(f"ERROR: {{e}}", file=sys.stderr)
+    sys.exit(1)
+"""
+    r = run([vpy, "-c", dl_code], capture=True)
+    if r.returncode == 0 and "OK" in r.stdout:
+        print(f"[OK] LM model downloaded to {lm_dir}")
+    else:
+        err = r.stderr.strip().splitlines()
+        for line in err[-5:]:
+            print(f"     {line}")
+        print(f"[WARN] LM model download failed — AI lyrics will not work")
+        print(f"       You can manually download from:")
+        print(f"       https://huggingface.co/{LM_HF_REPO}/tree/main/{LM_MODEL_NAME}")
+        print(f"       and place it at: {lm_dir}")
+
+
+# ---------------------------------------------------------------------------
+# Step 6: audio-separator in UI venv for stems
 # ---------------------------------------------------------------------------
 def ensure_audio_separator() -> None:
     ui_py = str(SCRIPT_DIR / ".venv" / "Scripts" / "python.exe")
@@ -324,6 +396,8 @@ if __name__ == "__main__":
     ensure_cuda_torch()
 
     ok = ensure_ace_step_v15()
+
+    ensure_lm_model()
 
     ensure_audio_separator()
 

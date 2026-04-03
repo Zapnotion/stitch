@@ -39,7 +39,7 @@ class LogPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._expanded = False
+        self._expanded = True
         self._build_ui()
         self._relay = LogRelayThread(self)
         self._relay.new_line.connect(self._append)
@@ -58,17 +58,17 @@ class LogPanel(QWidget):
         bar_lay.setContentsMargins(10, 0, 10, 0)
         bar_lay.setSpacing(6)
 
-        self._toggle = QPushButton("▶  Console")
+        self._toggle = QPushButton("▼  Console")
         self._toggle.setObjectName("LogToggle")
         self._toggle.setCheckable(True)
-        self._toggle.setChecked(False)
+        self._toggle.setChecked(True)
         self._toggle.clicked.connect(self._on_toggle)
         bar_lay.addWidget(self._toggle)
         bar_lay.addStretch()
 
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setObjectName("LogClear")
-        self._clear_btn.setVisible(False)
+        self._clear_btn.setVisible(True)
         self._clear_btn.clicked.connect(self._log.clear if hasattr(self, '_log') else lambda: None)
         bar_lay.addWidget(self._clear_btn)
 
@@ -80,7 +80,7 @@ class LogPanel(QWidget):
         self._log.setReadOnly(True)
         self._log.setMaximumBlockCount(2000)
         self._log.setFixedHeight(180)
-        self._log.setVisible(False)
+        self._log.setVisible(True)
         self._log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._clear_btn.clicked.connect(self._log.clear)
         root.addWidget(self._log)
@@ -102,6 +102,11 @@ class LogPanel(QWidget):
         cursor = self._log.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(line + "\n", fmt)
+        # Auto-expand the panel when an error arrives so it's never silent
+        upper = line.upper()
+        if not self._expanded and ("ERROR" in upper or "[WARN]" in upper):
+            self._toggle.setChecked(True)
+            self._on_toggle(True)
         if self._expanded:
             self._log.setTextCursor(cursor)
             self._log.ensureCursorVisible()

@@ -77,6 +77,10 @@ echo.
 echo  Starting Stitch...
 echo.
 
+:: STITCH_DEBUG=1 ensures all log levels (INFO+DEBUG) are visible in the
+:: Console panel inside the app and in this window. Remove to reduce noise.
+set STITCH_DEBUG=1
+
 :: Activate the UI venv for the main process
 call ".venv\Scripts\activate.bat"
 python main.py

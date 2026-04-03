@@ -238,19 +238,32 @@ def _get_handlers(p: dict):
 
     llm = LLMHandler()
     try:
-        llm.initialize(
+        # initialize() returns (status_msg, success) — must check success flag
+        init_result = llm.initialize(
             checkpoint_dir=project_root,
             lm_model_path=lm_model,
             backend=lm_backend,
             device=device,
         )
-        progress(1, 8, 10, f"LLM ready ({lm_model})")
+        # Handle both old (no return) and new (status_msg, success) signatures
+        if isinstance(init_result, tuple):
+            status_msg, init_ok = init_result
+        else:
+            init_ok = True
+            status_msg = "ok"
+        if init_ok:
+            progress(1, 8, 10, f"LLM ready ({lm_model}): {status_msg}")
+        else:
+            emit({"type": "error",
+                  "message": f"[LLM init failed] initialize() returned success=False: {status_msg}\n"
+                              f"AI Writes lyrics will NOT work this session."})
+            llm = None
     except Exception as exc:
-        # LLM init failures are non-fatal — generation works without it
-        # (the DiT will use whatever text it receives directly)
-        emit({"type": "progress", "variation_index": 1, "total_variations": 1,
-              "step": 8, "total_steps": 10,
-              "message": f"[warn] LLM init failed ({exc}) — generating without LLM enrichment"})
+        import traceback
+        emit({"type": "error",
+              "message": f"[LLM init failed] {type(exc).__name__}: {exc}\n"
+                         f"AI Writes lyrics will NOT work this session.\n"
+                         f"Traceback:\n{traceback.format_exc()}"})
         llm = None
 
     _dit_handler = dit
@@ -296,10 +309,15 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
     output_type  = p.get("output_type", "with_vocals")  # "with_vocals" | "instrumental"
     instrumental = (output_type == "instrumental")
 
-    base = f(
-        seed           = seed,
-        audio_duration = float(p.get("duration", 30.0)),
-    )
+    # GenerationParams uses "audio_duration" in some versions and "duration"
+    # in others. Introspect the actual installed signature to handle both.
+    duration_val = float(p.get("duration", 30.0))
+    if "audio_duration" in fields:
+        base = f(seed=seed, audio_duration=duration_val)
+    elif "duration" in fields:
+        base = f(seed=seed, duration=duration_val)
+    else:
+        base = f(seed=seed)  # no duration field — model will use its default
 
     # Vocal scaffold used when no lyrics are available but vocals are wanted.
     # An empty string tells ACE-Step "no vocals" — we need at least a structural
@@ -308,47 +326,71 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
 
     if mode == "text":
         if lyrics_mode == "ai_writes" and llm_handler is not None:
-            # Full LM path — create_sample writes caption + lyrics from the
-            # style prompt used as a natural-language query.
+            # Full LM path — use create_sample to generate caption + lyrics
+            # from the user's query. If create_sample fails (common on Windows
+            # pt backend due to constrained decoding issues), fall back to
+            # format_sample which takes an explicit caption and enriches it —
+            # a safer path that still uses the LLM for lyrics generation.
+            lp = p.get("lyrics_prompt", "").strip()
+            query = lp if lp else p.get("style_prompt", "")
+
+            sample = None
+
+            # --- Attempt 1: create_sample (full auto mode) ---
             try:
                 from acestep.inference import create_sample
-                # lyrics_prompt drives what the LM writes about (theme,
-                # subject, language, mood). Falls back to style_prompt if
-                # the user left it blank.
-                lp = p.get("lyrics_prompt", "").strip()
-                query = lp if lp else p.get("style_prompt", "")
-                sample = create_sample(
-                    llm_handler  = llm_handler,
-                    query        = query,
-                    instrumental = instrumental,
+                raw = create_sample(
+                    llm_handler             = llm_handler,
+                    query                   = query,
+                    instrumental            = instrumental,
+                    use_constrained_decoding = False,  # skip FSM — more stable on pt backend
                 )
-                if sample and sample.success:
-                    # Use the LM-generated lyrics. If instrumental, the LM will
-                    # have set lyrics="[Instrumental]" itself — trust that.
-                    # If vocal and the LM returned empty lyrics, use the scaffold
-                    # so the DiT still knows to generate a vocal track.
-                    lyrics_out = sample.lyrics or (
-                        "[Instrumental]" if instrumental else VOCAL_SCAFFOLD
-                    )
-                    base.update(f(
-                        caption        = sample.caption or p.get("style_prompt", ""),
-                        lyrics         = lyrics_out,
-                        bpm            = sample.bpm,
-                        keyscale       = sample.keyscale,
-                        vocal_language = sample.language,
-                    ))
+                if raw and raw.success:
+                    sample = raw
                 else:
-                    emit({"type": "progress", "variation_index": variation_idx,
-                          "total_variations": total, "step": 9, "total_steps": 30,
-                          "message": "[warn] create_sample failed — using vocal scaffold"})
-                    base.update(f(
-                        caption = p.get("style_prompt", ""),
-                        lyrics  = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD,
-                    ))
+                    reason = getattr(raw, "error", None) or "success=False, no error detail"
+                    emit({"type": "error",
+                          "message": f"[create_sample attempt 1] {reason} — trying format_sample"})
             except Exception as exc:
-                emit({"type": "progress", "variation_index": variation_idx,
-                      "total_variations": total, "step": 9, "total_steps": 30,
-                      "message": f"[warn] create_sample error ({exc}) — using vocal scaffold"})
+                import traceback
+                emit({"type": "error",
+                      "message": f"[create_sample attempt 1 exception] {type(exc).__name__}: {exc}\n"
+                                 f"{traceback.format_exc()}\nTrying format_sample..."})
+
+            # --- Attempt 2: format_sample (caption+lyrics enrichment mode) ---
+            if sample is None:
+                try:
+                    from acestep.inference import format_sample
+                    scaffold = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD
+                    raw2 = format_sample(
+                        llm_handler             = llm_handler,
+                        caption                 = p.get("style_prompt", ""),
+                        lyrics                  = scaffold,
+                        use_constrained_decoding = False,
+                    )
+                    if raw2 and raw2.success:
+                        sample = raw2
+                    else:
+                        reason2 = getattr(raw2, "error", None) or "success=False"
+                        emit({"type": "error",
+                              "message": f"[format_sample attempt 2] {reason2} — using vocal scaffold directly"})
+                except Exception as exc2:
+                    import traceback
+                    emit({"type": "error",
+                          "message": f"[format_sample attempt 2 exception] {type(exc2).__name__}: {exc2}\n"
+                                     f"{traceback.format_exc()}\nUsing vocal scaffold directly."})
+
+            # --- Apply result or final fallback ---
+            if sample is not None:
+                lyrics_out = sample.lyrics or ("[Instrumental]" if instrumental else VOCAL_SCAFFOLD)
+                base.update(f(
+                    caption        = sample.caption or p.get("style_prompt", ""),
+                    lyrics         = lyrics_out,
+                    bpm            = sample.bpm,
+                    keyscale       = sample.keyscale,
+                    vocal_language = sample.language,
+                ))
+            else:
                 base.update(f(
                     caption = p.get("style_prompt", ""),
                     lyrics  = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD,
@@ -401,6 +443,19 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
     config_path = _select_config(p)
     default_steps = 8 if "turbo" in config_path else 32
     base.update(f(infer_step=p.get("infer_steps", default_steps)))
+
+    # thinking=True enables ACE-Step's internal LLM chain-of-thought pipeline.
+    # This is what drives the LLM to enrich caption and generate lyrics internally
+    # during generate_music(). Without it, llm_initialized=False causes use_lm=False
+    # regardless of whether we successfully initialised our LLMHandler.
+    # Only meaningful for text mode — cover/repair use their own pipelines.
+    if mode == "text" and lyrics_mode != "instrumental":
+        base.update(f(
+            thinking        = True,
+            use_cot_caption = True,
+            use_cot_metas   = True,
+            use_cot_language = (not instrumental),  # skip language CoT for instrumental
+        ))
 
     return GenerationParams(**base)
 
