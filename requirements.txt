@@ -6,4 +6,8 @@ demucs>=4.0.0
 pydub>=0.25.1
 huggingface_hub>=0.20.0
 audio-separator[gpu]>=0.27.0
+# whisper-timestamped: word-level lyric alignment (Phase 1).
+# CPU-only — never competes with ACEStep's GPU budget.
+# ~150 MB base model downloads on first use.
+whisper-timestamped>=1.15.4
 # llama-cpp-python is installed separately by run.bat (needs CUDA flag handling)

@@ -56,6 +56,11 @@ class TextGenerationRequest:
     seed:              Optional[int]     = None
     lora:              Optional[str]     = None
     output_dir:        str               = ""    # resolved by caller from cfg
+    # Phase 2 musical parameters
+    bpm:               Optional[int]     = None  # 40–200; None = free
+    key:               str               = ""    # e.g. "C major", "A minor"; "" = free
+    time_signature:    str               = ""    # e.g. "4/4", "6/8"; "" = free
+    exclusions:        str               = ""    # negative prompt; appended as "Avoid: ..."
 
 
 @dataclass
@@ -100,10 +105,12 @@ class GenerationResult:
     duration_secs:     float         = 0.0
     mode:              GenerationMode = GenerationMode.TEXT
     style_prompt:      str           = ""
+    lyrics:            str           = ""   # original lyrics used for generation (needed by aligner)
     score:             float         = 0.0  # future: auto-quality score
     starred:           bool          = False
     stems:             dict[str, str] = field(default_factory=dict)
     # stems = {"vocals": "/path/...", "drums": "...", "bass": "...", "other": "..."}
+    alignment_path:    Optional[str] = None  # path to .alignment.json sidecar; None until aligned
 
     @property
     def filename(self) -> str:

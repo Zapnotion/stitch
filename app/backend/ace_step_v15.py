@@ -197,6 +197,7 @@ class ACEStepV15:
                         duration_secs   = msg.get("duration_secs", 0.0),
                         mode            = GenerationMode(msg.get("mode", "text")),
                         style_prompt    = msg.get("style_prompt", ""),
+                        lyrics          = msg.get("lyrics", ""),
                     ))
                 elif mtype == "error":
                     log.error(f"[v1.5-worker] {msg.get('message')}")
@@ -246,6 +247,11 @@ class ACEStepV15:
             "output_dir":         request.output_dir,
             "models_dir":         self.models_dir,
             "device":             self.device,
+            # Phase 2 musical parameters
+            "bpm":                request.bpm,
+            "key":                request.key,
+            "time_signature":     request.time_signature,
+            "exclusions":         request.exclusions,
         }, request.variations, progress_cb)
 
     def generate_cover(

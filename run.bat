@@ -81,6 +81,35 @@ if errorlevel 1 (
 :llama_done
 
 :: ---------------------------------------------------------------------------
+:: 2c. whisper-timestamped (lyric alignment — CPU-only, Phase 1)
+:: ---------------------------------------------------------------------------
+echo.
+echo  [Step 1c/4] Checking whisper-timestamped (lyric alignment)...
+
+:: Check if already installed
+"%VENV_PY%" -c "import whisper_timestamped" >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] whisper-timestamped already installed
+    goto :whisper_done
+)
+
+:: whisper-timestamped is CPU-only — no CUDA variant needed.
+:: It depends on openai-whisper which in turn needs ffmpeg on PATH.
+echo [..] Installing whisper-timestamped (CPU-only, ~150 MB model on first use)...
+"%VENV_PY%" -m pip install whisper-timestamped --upgrade --quiet
+
+"%VENV_PY%" -c "import whisper_timestamped" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] whisper-timestamped install failed.
+    echo        Lyric alignment and the timeline view will be unavailable.
+    echo        Generation still works normally without it.
+) else (
+    echo [OK] whisper-timestamped ready
+)
+
+:whisper_done
+
+:: ---------------------------------------------------------------------------
 :: 3. Model venv (.venv_model)
 :: ---------------------------------------------------------------------------
 echo.

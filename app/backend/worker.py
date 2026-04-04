@@ -26,6 +26,29 @@ from app.models.generation import (
 
 
 # ---------------------------------------------------------------------------
+# Alignment helper — called from every generation worker after results arrive
+# ---------------------------------------------------------------------------
+
+def _run_alignment_for_results(results: list[GenerationResult]) -> None:
+    """
+    Run the aligner on each result that has lyrics and write the sidecar.
+    Safe to call even when whisper-timestamped is not installed — aligner
+    returns None and we skip writing. Updates result.alignment_path in-place.
+    """
+    from app.backend.aligner import ALIGNMENT_AVAILABLE, align, write_sidecar
+    from app.config import cfg
+    if not ALIGNMENT_AVAILABLE:
+        return
+    model_name = cfg.get("whisper_model", "base")
+    for r in results:
+        if not r.lyrics.strip():
+            continue
+        sidecar = align(r.audio_path, r.lyrics, model_name=model_name)
+        if sidecar:
+            r.alignment_path = write_sidecar(r.audio_path, sidecar)
+
+
+# ---------------------------------------------------------------------------
 # Base worker
 # ---------------------------------------------------------------------------
 
@@ -52,6 +75,7 @@ class TextGenerationWorker(BaseWorker):
                 self._request,
                 progress_cb=lambda p: self.progress.emit(p),
             )
+            _run_alignment_for_results(results)
             self.result.emit(results)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -75,6 +99,7 @@ class CoverWorker(BaseWorker):
                 self._request,
                 progress_cb=lambda p: self.progress.emit(p),
             )
+            _run_alignment_for_results(results)
             self.result.emit(results)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -98,6 +123,7 @@ class VocalBackingWorker(BaseWorker):
                 self._request,
                 progress_cb=lambda p: self.progress.emit(p),
             )
+            _run_alignment_for_results(results)
             self.result.emit(results)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -122,6 +148,45 @@ class RepairWorker(BaseWorker):
                 progress_cb=lambda p: self.progress.emit(p),
             )
             self.result.emit([result])
+        except Exception as exc:
+            self.error.emit(str(exc))
+        finally:
+            self.done.emit()
+
+
+# ---------------------------------------------------------------------------
+# Alignment (post-generation, runs in its own thread so UI never blocks)
+# ---------------------------------------------------------------------------
+
+class AlignmentWorker(QThread):
+    """
+    Runs the aligner on a single GenerationResult after the fact.
+    Used when the user manually triggers re-alignment, or when a repair
+    produces a new result that needs a fresh sidecar.
+
+    Emits aligned(result) with the updated result (alignment_path set).
+    """
+    aligned = Signal(object)   # GenerationResult with alignment_path populated
+    error   = Signal(str)
+    done    = Signal()
+
+    def __init__(self, result: GenerationResult) -> None:
+        super().__init__()
+        self._result = result
+
+    def run(self) -> None:
+        try:
+            from app.backend.aligner import ALIGNMENT_AVAILABLE, align, write_sidecar
+            from app.config import cfg
+            if not ALIGNMENT_AVAILABLE:
+                self.done.emit()
+                return
+            model_name = cfg.get("whisper_model", "base")
+            sidecar = align(self._result.audio_path, self._result.lyrics,
+                            model_name=model_name)
+            if sidecar:
+                self._result.alignment_path = write_sidecar(self._result.audio_path, sidecar)
+                self.aligned.emit(self._result)
         except Exception as exc:
             self.error.emit(str(exc))
         finally:
@@ -183,3 +248,4 @@ class ModelLoaderWorker(QThread):
             self.loaded.emit(False)
         finally:
             self.done.emit()
+

@@ -54,7 +54,8 @@ def progress(variation_index: int, step: int, total_steps: int,
 
 
 def result(variation_index: int, audio_path: str, seed: int,
-           duration: float, mode: str, style_prompt: str) -> None:
+           duration: float, mode: str, style_prompt: str,
+           lyrics: str = "") -> None:
     emit({
         "type":           "result",
         "variation_index": variation_index,
@@ -63,6 +64,7 @@ def result(variation_index: int, audio_path: str, seed: int,
         "duration_secs":  duration,
         "mode":           mode,
         "style_prompt":   style_prompt,
+        "lyrics":         lyrics,
     })
 
 
@@ -421,18 +423,43 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
             # --- Apply result or final fallback ---
             if sample is not None:
                 lyrics_out = sample.lyrics or ("[Instrumental]" if instrumental else VOCAL_SCAFFOLD)
+                # Phase 2: user-set bpm/key override LM-generated values if provided.
+                # Time signature and exclusions are always appended to caption.
+                caption_out = sample.caption or p.get("style_prompt", "")
+                time_sig = p.get("time_signature", "").strip()
+                excl     = p.get("exclusions", "").strip()
+                if time_sig:
+                    caption_out = f"{caption_out}, {time_sig} time signature"
+                if excl:
+                    caption_out = f"{caption_out}. Avoid: {excl}"
+
+                user_bpm = p.get("bpm")
+                user_key = p.get("key", "").strip()
                 base.update(f(
-                    caption        = sample.caption or p.get("style_prompt", ""),
+                    caption        = caption_out,
                     lyrics         = lyrics_out,
-                    bpm            = sample.bpm,
-                    keyscale       = sample.keyscale,
+                    bpm            = int(user_bpm) if user_bpm else sample.bpm,
+                    keyscale       = user_key     if user_key  else sample.keyscale,
                     vocal_language = sample.language,
                 ))
             else:
+                caption_fb = p.get("style_prompt", "")
+                time_sig   = p.get("time_signature", "").strip()
+                excl       = p.get("exclusions", "").strip()
+                if time_sig:
+                    caption_fb = f"{caption_fb}, {time_sig} time signature".lstrip(", ")
+                if excl:
+                    caption_fb = f"{caption_fb}. Avoid: {excl}".lstrip(". ")
                 base.update(f(
-                    caption = p.get("style_prompt", ""),
+                    caption = caption_fb,
                     lyrics  = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD,
                 ))
+                user_bpm = p.get("bpm")
+                user_key = p.get("key", "").strip()
+                if user_bpm:
+                    base.update(f(bpm=int(user_bpm)))
+                if user_key:
+                    base.update(f(keyscale=user_key))
         else:
             # User-provided lyrics (or LLM unavailable).
             # If user typed lyrics, use them. If user typed nothing but still
@@ -446,10 +473,32 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
                 lyrics_out = user_lyrics
             else:
                 lyrics_out = VOCAL_SCAFFOLD
+
+            # Build caption: start with style_prompt, then append Phase 2 hints.
+            # Time signature has no native GenerationParams field — append as text.
+            # Exclusions become "Avoid: ..." which ACEStep's caption encoder responds to.
+            caption = p.get("style_prompt", "")
+            time_sig = p.get("time_signature", "").strip()
+            excl     = p.get("exclusions", "").strip()
+            if time_sig:
+                caption = f"{caption}, {time_sig} time signature".lstrip(", ")
+            if excl:
+                caption = f"{caption}. Avoid: {excl}".lstrip(". ")
+
             base.update(f(
-                caption = p.get("style_prompt", ""),
+                caption = caption,
                 lyrics  = lyrics_out,
             ))
+
+            # BPM and key — pass through inspect-safe f() so missing fields
+            # on older ACEStep installs are silently dropped.
+            bpm = p.get("bpm")
+            key = p.get("key", "").strip()
+            if bpm:
+                base.update(f(bpm=int(bpm)))
+            if key:
+                # ACEStep uses "keyscale" field; value format: "C major" / "A minor"
+                base.update(f(keyscale=key))
 
     elif mode == "cover":
         base.update(f(
@@ -650,7 +699,8 @@ def run_text(p: dict) -> None:
         fsize = Path(path).stat().st_size // 1024 if Path(path).exists() else 0
         progress(i, TOTAL_STEPS, TOTAL_STEPS,
                  f"Variation {i}/{total} done — {dur:.1f}s | {fsize} KB | seed {seed}", total)
-        result(i, path, seed, dur, "text", p.get("style_prompt", ""))
+        result(i, path, seed, dur, "text", p.get("style_prompt", ""),
+               lyrics=p.get("lyrics", ""))
 
 
 def run_cover(p: dict) -> None:

@@ -1,0 +1,24 @@
+{
+  "genres": [
+    "acoustic pop", "adult contemporary", "afrobeats", "ambient",
+    "ambient electronic", "anthem rock", "baroque pop", "bedroom pop",
+    "bluegrass", "blues rock", "bossa nova", "celtic folk",
+    "chamber pop", "chillhop", "cinematic orchestral", "classic rock",
+    "classical", "country pop", "dark ambient", "deep house",
+    "disco", "dream pop", "drum and bass", "dub",
+    "dubstep", "electronic", "electropop", "emo",
+    "epic orchestral", "folk", "folk rock", "funk",
+    "gospel", "grunge", "hard rock", "heavy metal",
+    "hip hop", "house", "indie folk", "indie pop",
+    "indie rock", "jazz", "jazz fusion", "latin pop",
+    "lo-fi hip hop", "marimba", "math rock", "melodic dubstep",
+    "metal", "minimal techno", "motown", "neo-soul",
+    "new wave", "noise rock", "nu jazz", "orchestral pop",
+    "piano ballad", "post-rock", "progressive rock", "psychedelic",
+    "psychedelic rock", "punk", "punk rock", "R&B",
+    "ragtime", "reggae", "reggaeton", "shoegaze",
+    "singer-songwriter", "ska", "smooth jazz", "soul",
+    "southern gothic", "synthpop", "synthwave", "techno",
+    "trap", "tropical house", "UK garage", "world music"
+  ]
+}

@@ -7,7 +7,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QPlainTextEdit, QProgressBar, QPushButton,
@@ -32,6 +32,7 @@ from app.models.generation import (
 )
 from app.ui.widgets.preset_panel import PresetPanel
 from app.ui.widgets.result_card import ResultCard
+from app.ui.widgets.structure_builder import StructureBuilderWidget
 from app.ui.widgets.upload_zone import UploadZone
 
 
@@ -92,7 +93,8 @@ class GeneratePage(QWidget):
 
         left_layout.addWidget(tab_row)
 
-        # Stacked panels
+        # Stacked panels — wrapped in a scroll area so the Generate button stays
+        # pinned at the bottom regardless of how much form content is visible.
         self._stack = QStackedWidget()
         self._panels = {
             "text":  self._build_text_panel(),
@@ -101,7 +103,13 @@ class GeneratePage(QWidget):
         }
         for w in self._panels.values():
             self._stack.addWidget(w)
-        left_layout.addWidget(self._stack, 1)
+
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll.setWidget(self._stack)
+        left_layout.addWidget(left_scroll, 1)
 
         # --- Preset panel (collapsible strip) ---
         preset_toggle = QPushButton("▸  Presets")
@@ -249,12 +257,12 @@ class GeneratePage(QWidget):
         lay.addWidget(self._ai_lyrics_prompt)
 
         # --- AI writes controls (creativity + adherence sliders) ---
-        # Shown only when "AI writes" pill is active.
+        # Shown only when "AI writes" pill is active, collapsed by default.
         self._ai_controls = QWidget()
         self._ai_controls.setObjectName("AIControlsBox")
         ai_lay = QVBoxLayout(self._ai_controls)
-        ai_lay.setContentsMargins(0, 4, 0, 0)
-        ai_lay.setSpacing(6)
+        ai_lay.setContentsMargins(0, 0, 0, 0)
+        ai_lay.setSpacing(4)
 
         def _slider_row(label_left: str, label_right: str,
                         lo: int, hi: int, val: int) -> tuple:
@@ -300,21 +308,42 @@ class GeneratePage(QWidget):
 
             return row_w, slider, val_lbl
 
+        # "Advanced" toggle — reveals the two AI sliders
+        self._ai_advanced_toggle = QPushButton("▸  Advanced")
+        self._ai_advanced_toggle.setObjectName("AdvancedToggle")
+        self._ai_advanced_toggle.setCheckable(True)
+        self._ai_advanced_toggle.setChecked(False)
+
+        self._ai_sliders_box = QWidget()
+        self._ai_sliders_box.setVisible(False)
+        sliders_lay = QVBoxLayout(self._ai_sliders_box)
+        sliders_lay.setContentsMargins(0, 4, 0, 0)
+        sliders_lay.setSpacing(6)
+
         creativity_w, self._creativity_slider, self._creativity_val = _slider_row(
             "Safe", "Wild", 0, 10, 5   # default 0.5
         )
         creativity_label = QLabel("Creativity")
         creativity_label.setObjectName("FieldLabel")
-        ai_lay.addWidget(creativity_label)
-        ai_lay.addWidget(creativity_w)
+        sliders_lay.addWidget(creativity_label)
+        sliders_lay.addWidget(creativity_w)
 
         adherence_w, self._adherence_slider, self._adherence_val = _slider_row(
             "Loose", "Strict", 0, 10, 7   # default 0.7
         )
         adherence_label = QLabel("Topic adherence")
         adherence_label.setObjectName("FieldLabel")
-        ai_lay.addWidget(adherence_label)
-        ai_lay.addWidget(adherence_w)
+        sliders_lay.addWidget(adherence_label)
+        sliders_lay.addWidget(adherence_w)
+
+        def _toggle_ai_advanced(checked: bool) -> None:
+            self._ai_advanced_toggle.setText(("▾" if checked else "▸") + "  Advanced")
+            self._ai_sliders_box.setVisible(checked)
+
+        self._ai_advanced_toggle.toggled.connect(_toggle_ai_advanced)
+
+        ai_lay.addWidget(self._ai_advanced_toggle)
+        ai_lay.addWidget(self._ai_sliders_box)
 
         lay.addWidget(self._ai_controls)
 
@@ -348,6 +377,77 @@ class GeneratePage(QWidget):
         self._style_prompt.setPlaceholderText("genre, mood, instruments, vocal style, era…")
         self._style_prompt.setFixedHeight(90)
         lay.addWidget(self._style_prompt)
+
+        # --- Phase 2.4: Micro-genre blend (toggle between blend and manual) ---
+        genre_hdr_row = QHBoxLayout()
+        genre_lbl = self._field_label("Genre blend")
+        self._genre_manual_btn = QPushButton("Manual ▸")
+        self._genre_manual_btn.setObjectName("AdvancedToggle")
+        self._genre_manual_btn.setCheckable(True)
+        self._genre_manual_btn.setChecked(False)
+        genre_hdr_row.addWidget(genre_lbl)
+        genre_hdr_row.addStretch()
+        genre_hdr_row.addWidget(self._genre_manual_btn)
+        lay.addLayout(genre_hdr_row)
+
+        self._genre_blend_box = self._build_genre_blend_widget()
+        lay.addWidget(self._genre_blend_box)
+
+        # --- Phase 2.3: Exclusions (negative prompt) ---
+        self._exclusions_toggle = QPushButton("▸  Exclusions")
+        self._exclusions_toggle.setObjectName("AdvancedToggle")
+        self._exclusions_toggle.setCheckable(True)
+        self._exclusions_toggle.setChecked(False)
+        lay.addWidget(self._exclusions_toggle)
+
+        self._exclusions_box = QWidget()
+        excl_lay = QVBoxLayout(self._exclusions_box)
+        excl_lay.setContentsMargins(0, 0, 0, 0)
+        excl_lay.setSpacing(2)
+        self._exclusions = QPlainTextEdit()
+        self._exclusions.setObjectName("PromptBox")
+        self._exclusions.setPlaceholderText("no piano, no autotune, no trap beat")
+        self._exclusions.setFixedHeight(52)
+        excl_lay.addWidget(self._exclusions)
+        self._exclusions_box.setVisible(False)
+        lay.addWidget(self._exclusions_box)
+
+        def _toggle_exclusions(checked: bool) -> None:
+            self._exclusions_toggle.setText(("▾" if checked else "▸") + "  Exclusions")
+            self._exclusions_box.setVisible(checked)
+        self._exclusions_toggle.toggled.connect(_toggle_exclusions)
+
+        # --- Phase 2.2: Song structure builder ---
+        self._structure_toggle = QPushButton("▸  Song structure")
+        self._structure_toggle.setObjectName("AdvancedToggle")
+        self._structure_toggle.setCheckable(True)
+        self._structure_toggle.setChecked(False)
+        lay.addWidget(self._structure_toggle)
+
+        self._structure_builder = StructureBuilderWidget()
+        self._structure_builder.setVisible(False)
+        lay.addWidget(self._structure_builder)
+
+        def _toggle_structure(checked: bool) -> None:
+            self._structure_toggle.setText(("▾" if checked else "▸") + "  Song structure")
+            self._structure_builder.setVisible(checked)
+        self._structure_toggle.toggled.connect(_toggle_structure)
+
+        # --- Phase 2.1: Musical parameters (BPM, key, time signature, ref track) ---
+        self._musical_toggle = QPushButton("▸  Musical parameters")
+        self._musical_toggle.setObjectName("AdvancedToggle")
+        self._musical_toggle.setCheckable(True)
+        self._musical_toggle.setChecked(False)
+        lay.addWidget(self._musical_toggle)
+
+        self._musical_box = self._build_musical_params_widget()
+        self._musical_box.setVisible(False)
+        lay.addWidget(self._musical_box)
+
+        def _toggle_musical(checked: bool) -> None:
+            self._musical_toggle.setText(("▾" if checked else "▸") + "  Musical parameters")
+            self._musical_box.setVisible(checked)
+        self._musical_toggle.toggled.connect(_toggle_musical)
 
         lay.addWidget(self._divider())
 
@@ -408,6 +508,377 @@ class GeneratePage(QWidget):
 
         lay.addStretch()
         return w
+
+    # --- Genre blend widget (Phase 2.4) -------------------------------------
+
+    def _build_genre_blend_widget(self) -> QWidget:
+        """Two genre selectors + proportion slider + live preview."""
+        import json as _json
+        genres_file = Path(__file__).parent.parent.parent / "app" / "data" / "genres.json"
+        try:
+            genres = _json.loads(genres_file.read_text(encoding="utf-8"))["genres"]
+        except Exception:
+            genres = ["pop", "rock", "jazz", "electronic", "classical"]
+
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        # Row 1: Genre A + slider + Genre B
+        blend_row = QHBoxLayout()
+        blend_row.setSpacing(6)
+
+        self._genre_a = QComboBox()
+        self._genre_a.setObjectName("SortCombo")
+        self._genre_a.addItems(genres)
+        self._genre_a.setCurrentText("indie pop")
+        blend_row.addWidget(self._genre_a, 2)
+
+        self._genre_slider = QSlider(Qt.Horizontal)
+        self._genre_slider.setRange(0, 100)
+        self._genre_slider.setValue(50)
+        self._genre_slider.setObjectName("LyricsSlider")
+        blend_row.addWidget(self._genre_slider, 3)
+
+        self._genre_b = QComboBox()
+        self._genre_b.setObjectName("SortCombo")
+        self._genre_b.addItems(genres)
+        self._genre_b.setCurrentText("cinematic orchestral")
+        blend_row.addWidget(self._genre_b, 2)
+        lay.addLayout(blend_row)
+
+        # Row 2: optional third genre
+        third_row = QHBoxLayout()
+        third_row.setSpacing(6)
+        add_third_btn = QPushButton("+ third genre")
+        add_third_btn.setObjectName("AdvancedToggle")
+        add_third_btn.setCheckable(True)
+        third_row.addWidget(add_third_btn)
+
+        self._genre_c_box = QWidget()
+        gc_lay = QHBoxLayout(self._genre_c_box)
+        gc_lay.setContentsMargins(0, 0, 0, 0)
+        gc_lay.setSpacing(4)
+        gc_lbl = QLabel("+ ")
+        gc_lbl.setObjectName("FieldLabel")
+        self._genre_c = QComboBox()
+        self._genre_c.setObjectName("SortCombo")
+        self._genre_c.addItems(genres)
+        self._genre_c_pct = QSpinBox()
+        self._genre_c_pct.setRange(5, 50)
+        self._genre_c_pct.setValue(20)
+        self._genre_c_pct.setSuffix("%")
+        self._genre_c_pct.setObjectName("SpinBox")
+        self._genre_c_pct.setFixedWidth(60)
+        gc_lay.addWidget(gc_lbl)
+        gc_lay.addWidget(self._genre_c, 1)
+        gc_lay.addWidget(self._genre_c_pct)
+        self._genre_c_box.setVisible(False)
+        third_row.addWidget(self._genre_c_box)
+        third_row.addStretch()
+        add_third_btn.toggled.connect(self._genre_c_box.setVisible)
+        lay.addLayout(third_row)
+
+        # Row 3: live preview label
+        self._genre_preview = QLabel()
+        self._genre_preview.setObjectName("HintLabel")
+        self._genre_preview.setWordWrap(True)
+        lay.addWidget(self._genre_preview)
+
+        # Wire up live preview and manual toggle
+        def _update_preview():
+            prompt = self._build_genre_prompt()
+            self._genre_preview.setText(f"→ {prompt}" if prompt else "")
+            # Sync into style prompt only when blend mode is active
+            if not self._genre_manual_btn.isChecked():
+                self._style_prompt.setPlainText(prompt)
+
+        self._genre_a.currentTextChanged.connect(lambda _: _update_preview())
+        self._genre_b.currentTextChanged.connect(lambda _: _update_preview())
+        self._genre_c.currentTextChanged.connect(lambda _: _update_preview())
+        self._genre_slider.valueChanged.connect(lambda _: _update_preview())
+        self._genre_c_pct.valueChanged.connect(lambda _: _update_preview())
+        add_third_btn.toggled.connect(lambda _: _update_preview())
+
+        def _toggle_manual(checked: bool):
+            self._genre_manual_btn.setText("Manual ▸" if not checked else "◂ Blend")
+            w.setVisible(not checked)
+            if checked:
+                self._style_prompt.setPlaceholderText("genre, mood, instruments, vocal style, era…")
+        self._genre_manual_btn.toggled.connect(_toggle_manual)
+
+        _update_preview()
+        return w
+
+    def _build_genre_prompt(self) -> str:
+        """Construct the blended style prompt string from genre controls."""
+        a    = self._genre_a.currentText().strip()
+        b    = self._genre_b.currentText().strip()
+        pct  = self._genre_slider.value()   # 0=all-a, 100=all-b
+
+        use_c = hasattr(self, '_genre_c_box') and self._genre_c_box.isVisible()
+        c     = self._genre_c.currentText().strip() if use_c else ""
+        c_pct = self._genre_c_pct.value() if use_c else 0
+
+        if pct == 0:
+            base = a
+        elif pct == 100:
+            base = b
+        elif pct <= 30:
+            base = f"{a}-influenced {b}"
+        elif pct >= 70:
+            base = f"{b}-influenced {a}"
+        else:
+            base = f"{a} and {b} blend"
+
+        if c:
+            base = f"{base} with {c} elements ({c_pct}%)"
+        return base
+
+    # --- Musical params widget (Phase 2.1 + 2.5) ----------------------------
+
+    def _build_musical_params_widget(self) -> QWidget:
+        """BPM slider + tap, key dropdown, time signature, reference track extractor."""
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 0)
+        lay.setSpacing(8)
+
+        # BPM row
+        bpm_row = QHBoxLayout()
+        bpm_row.setSpacing(6)
+        bpm_lbl = self._field_label("BPM")
+        bpm_row.addWidget(bpm_lbl)
+
+        self._bpm_slider = QSlider(Qt.Horizontal)
+        self._bpm_slider.setRange(0, 200)   # 0 = free
+        self._bpm_slider.setValue(0)
+        self._bpm_slider.setObjectName("LyricsSlider")
+        bpm_row.addWidget(self._bpm_slider, 1)
+
+        self._bpm_lbl = QLabel("Free")
+        self._bpm_lbl.setObjectName("SliderValue")
+        self._bpm_lbl.setFixedWidth(34)
+        bpm_row.addWidget(self._bpm_lbl)
+
+        self._bpm_tap_btn = QPushButton("Tap")
+        self._bpm_tap_btn.setObjectName("ActionBtn")
+        self._bpm_tap_btn.setFixedWidth(36)
+        self._bpm_tap_btn.setToolTip("Tap to set BPM")
+        bpm_row.addWidget(self._bpm_tap_btn)
+        lay.addLayout(bpm_row)
+
+        # Snap markers hint
+        snap_lbl = QLabel("Snap: 60  80  90  100  120  140  160")
+        snap_lbl.setObjectName("HintLabel")
+        lay.addWidget(snap_lbl)
+
+        # Wire BPM slider
+        self._bpm_slider.valueChanged.connect(self._on_bpm_changed)
+        self._bpm_slider.sliderReleased.connect(self._snap_bpm)
+
+        # Tap BPM state
+        self._tap_times: list[float] = []
+        self._tap_reset_timer = QTimer(self)
+        self._tap_reset_timer.setSingleShot(True)
+        self._tap_reset_timer.setInterval(2000)
+        self._tap_reset_timer.timeout.connect(lambda: self._tap_times.clear())
+        self._bpm_tap_btn.clicked.connect(self._on_bpm_tap)
+
+        # Key selector
+        key_row = QHBoxLayout()
+        key_row.setSpacing(6)
+        key_row.addWidget(self._field_label("Key"))
+        self._key_combo = QComboBox()
+        self._key_combo.setObjectName("SortCombo")
+        keys = ["Free"] + [
+            f"{n} {q}"
+            for q in ("major", "minor")
+            for n in ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+        ]
+        self._key_combo.addItems(keys)
+        key_row.addWidget(self._key_combo, 1)
+        lay.addLayout(key_row)
+
+        # Time signature
+        ts_row = QHBoxLayout()
+        ts_row.setSpacing(6)
+        ts_row.addWidget(self._field_label("Time"))
+        self._time_sig_combo = QComboBox()
+        self._time_sig_combo.setObjectName("SortCombo")
+        self._time_sig_combo.addItems(["Free", "4/4", "3/4", "6/8", "5/4", "7/8"])
+        ts_row.addWidget(self._time_sig_combo, 1)
+        lay.addLayout(ts_row)
+
+        # Phase 2.5: Reference track extractor
+        lay.addWidget(self._divider())
+        ref_hdr = QLabel("Extract from reference track")
+        ref_hdr.setObjectName("FieldLabel")
+        lay.addWidget(ref_hdr)
+
+        ref_row = QHBoxLayout()
+        ref_row.setSpacing(6)
+        self._ref_path_lbl = QLabel("No file selected")
+        self._ref_path_lbl.setObjectName("HintLabel")
+        self._ref_path_lbl.setSizePolicy(
+            self._ref_path_lbl.sizePolicy().horizontalPolicy(),
+            self._ref_path_lbl.sizePolicy().verticalPolicy(),
+        )
+        ref_browse = QPushButton("Browse…")
+        ref_browse.setObjectName("ActionBtn")
+        ref_browse.clicked.connect(self._on_ref_browse)
+        ref_row.addWidget(self._ref_path_lbl, 1)
+        ref_row.addWidget(ref_browse)
+        lay.addLayout(ref_row)
+
+        self._ref_extract_btn = QPushButton("Extract style")
+        self._ref_extract_btn.setObjectName("ActionBtn")
+        self._ref_extract_btn.setEnabled(False)
+        self._ref_extract_btn.clicked.connect(self._on_ref_extract)
+        lay.addWidget(self._ref_extract_btn)
+
+        self._ref_result_lbl = QLabel()
+        self._ref_result_lbl.setObjectName("HintLabel")
+        self._ref_result_lbl.setWordWrap(True)
+        self._ref_result_lbl.setVisible(False)
+        lay.addWidget(self._ref_result_lbl)
+
+        self._ref_audio_path: str = ""
+
+        return w
+
+    # --- BPM tap and snap ---------------------------------------------------
+
+    _BPM_SNAPS = [60, 80, 90, 100, 120, 140, 160]
+
+    def _on_bpm_changed(self, val: int) -> None:
+        self._bpm_lbl.setText("Free" if val == 0 else str(val))
+
+    def _snap_bpm(self) -> None:
+        val = self._bpm_slider.value()
+        if val == 0:
+            return
+        closest = min(self._BPM_SNAPS, key=lambda s: abs(s - val))
+        if abs(closest - val) <= 6:
+            self._bpm_slider.setValue(closest)
+
+    def _on_bpm_tap(self) -> None:
+        import time
+        now = time.monotonic()
+        self._tap_times.append(now)
+        self._tap_reset_timer.start()
+        if len(self._tap_times) >= 2:
+            intervals = [
+                self._tap_times[i] - self._tap_times[i - 1]
+                for i in range(1, len(self._tap_times))
+            ]
+            avg_interval = sum(intervals) / len(intervals)
+            bpm = int(round(60.0 / avg_interval))
+            bpm = max(40, min(200, bpm))
+            self._bpm_slider.setValue(bpm)
+
+    # --- Reference track extraction (Phase 2.5) -----------------------------
+
+    def _on_ref_browse(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select reference audio",
+            str(cfg.inputs_dir),
+            "Audio files (*.wav *.mp3 *.flac *.ogg *.aif *.aiff)",
+        )
+        if path:
+            self._ref_audio_path = path
+            from pathlib import Path as _P
+            self._ref_path_lbl.setText(_P(path).name)
+            self._ref_extract_btn.setEnabled(True)
+
+    def _on_ref_extract(self) -> None:
+        if not self._ref_audio_path:
+            return
+        self._ref_extract_btn.setEnabled(False)
+        self._ref_extract_btn.setText("Analysing…")
+        self._ref_result_lbl.setVisible(False)
+
+        path = self._ref_audio_path
+
+        from PySide6.QtCore import QThread, Signal as _Signal
+
+        class _ExtractWorker(QThread):
+            done  = _Signal(dict)
+            error = _Signal(str)
+            def __init__(self, p):
+                super().__init__()
+                self._p = p
+            def run(self):
+                try:
+                    import librosa
+                    import numpy as np
+                    y, sr = librosa.load(self._p, sr=None, mono=True, duration=60.0)
+                    # BPM
+                    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+                    bpm = int(round(float(tempo)))
+                    # Key via chroma
+                    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+                    chroma_mean = chroma.mean(axis=1)
+                    note_names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
+                    root_idx = int(np.argmax(chroma_mean))
+                    root = note_names[root_idx]
+                    # Major vs minor heuristic: compare 3rd and b3rd strengths
+                    minor_3rd = chroma_mean[(root_idx + 3) % 12]
+                    major_3rd = chroma_mean[(root_idx + 4) % 12]
+                    quality = "minor" if minor_3rd > major_3rd else "major"
+                    key_str = f"{root} {quality}"
+                    # Spectral descriptors
+                    centroid = librosa.feature.spectral_centroid(y=y, sr=sr).mean()
+                    rolloff  = librosa.feature.spectral_rolloff(y=y, sr=sr).mean()
+                    zcr      = librosa.feature.zero_crossing_rate(y).mean()
+                    rms      = librosa.feature.rms(y=y).mean()
+                    # Map to adjectives
+                    brightness = "bright" if centroid > 3000 else "dark"
+                    density    = "dense"  if rolloff  > 4000 else "sparse"
+                    energy_adj = "energetic" if rms > 0.05 else "calm"
+                    self.done.emit({
+                        "bpm": bpm, "key": key_str,
+                        "brightness": brightness, "density": density,
+                        "energy": energy_adj,
+                    })
+                except Exception as exc:
+                    self.error.emit(str(exc))
+
+        worker = _ExtractWorker(path)
+
+        def _on_done(info: dict):
+            bpm = max(40, min(200, info["bpm"]))
+            self._bpm_slider.setValue(bpm)
+            key_text = info["key"]
+            idx = self._key_combo.findText(key_text)
+            if idx >= 0:
+                self._key_combo.setCurrentIndex(idx)
+            # Build descriptor string and append to style prompt
+            descriptors = f"{info['brightness']}, {info['density']}, {info['energy']}"
+            existing = self._style_prompt.toPlainText().strip()
+            if existing:
+                self._style_prompt.setPlainText(f"{existing}, {descriptors}")
+            else:
+                self._style_prompt.setPlainText(descriptors)
+            self._ref_result_lbl.setText(
+                f"Detected: {bpm} BPM · {key_text} · {descriptors}"
+            )
+            self._ref_result_lbl.setVisible(True)
+            self._ref_extract_btn.setEnabled(True)
+            self._ref_extract_btn.setText("Extract style")
+
+        def _on_error(msg: str):
+            self._ref_result_lbl.setText(f"Analysis failed: {msg}")
+            self._ref_result_lbl.setVisible(True)
+            self._ref_extract_btn.setEnabled(True)
+            self._ref_extract_btn.setText("Extract style")
+
+        worker.done.connect(_on_done)
+        worker.error.connect(_on_error)
+        worker.start()
+        self._workers.append(worker)
 
     # --- Cover panel --------------------------------------------------------
 
@@ -588,10 +1059,34 @@ class GeneratePage(QWidget):
             len(out_pills) > 1 and out_pills[1].isChecked()
         ) else OutputType.WITH_VOCALS
 
+        # Phase 2.1: Musical parameters
+        bpm_val = self._bpm_slider.value() if hasattr(self, '_bpm_slider') else 0
+        key_val = self._key_combo.currentText() if hasattr(self, '_key_combo') else "Free"
+        ts_val  = self._time_sig_combo.currentText() if hasattr(self, '_time_sig_combo') else "Free"
+
+        # Phase 2.3: Exclusions
+        exclusions = self._exclusions.toPlainText().strip() if hasattr(self, '_exclusions') else ""
+
+        # Phase 2.2: Structure builder — merge lyrics if builder is populated
+        style_prompt = self._style_prompt.toPlainText().strip()
+        user_lyrics  = self._user_lyrics.toPlainText().strip()
+
+        if (hasattr(self, '_structure_builder')
+                and self._structure_toggle.isChecked()
+                and not self._structure_builder.is_empty()):
+            struct_lyrics, caption_hint = self._structure_builder.serialise()
+            # Prepend structure lyrics to any user-typed lyrics
+            if struct_lyrics:
+                user_lyrics = struct_lyrics
+                lyrics_mode = LyricsMode.USER
+            # Append energy/mood hints to style prompt
+            if caption_hint:
+                style_prompt = f"{style_prompt} {caption_hint}".strip()
+
         req = TextGenerationRequest(
-            style_prompt       = self._style_prompt.toPlainText().strip(),
+            style_prompt       = style_prompt,
             lyrics_mode        = lyrics_mode,
-            user_lyrics        = self._user_lyrics.toPlainText().strip(),
+            user_lyrics        = user_lyrics,
             lyrics_prompt      = self._ai_lyrics_prompt.toPlainText().strip(),
             lyrics_creativity  = self._creativity_slider.value() / 10.0,
             lyrics_adherence   = self._adherence_slider.value()  / 10.0,
@@ -602,6 +1097,11 @@ class GeneratePage(QWidget):
             seed               = seed,
             lora               = None if lora_val == "None" else str(cfg.models_dir / "loras" / lora_val),
             output_dir         = str(cfg.outputs_dir),
+            # Phase 2
+            bpm                = bpm_val if bpm_val > 0 else None,
+            key                = "" if key_val == "Free" else key_val,
+            time_signature     = "" if ts_val == "Free" else ts_val,
+            exclusions         = exclusions,
         )
         self._gen_btn.setEnabled(False)
         self._gen_btn.setText("Generating…")
@@ -688,8 +1188,115 @@ class GeneratePage(QWidget):
                 lambda res: self.open_in_repair.emit(res.audio_path)
             )
             card.star_toggled.connect(lambda _: self._apply_sort())
+            # Phase 1: word repair and section regeneration from lyric timeline
+            card.repair_word_requested.connect(self._on_repair_word)
+            card.regenerate_section_requested.connect(self._on_regenerate_section)
             self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
             self._result_cards.append(card)
+
+    def _on_repair_word(
+        self,
+        result: GenerationResult,
+        region_start: float,
+        region_end: float,
+        intended_word: str,
+    ) -> None:
+        """
+        Route a single-word repair request from the lyric timeline (Phase 1.4).
+        Uses the existing RepairRequest/RepairWorker machinery — region mode
+        with the intended word as the hint prompt. On success, splices the
+        repaired audio back and re-runs alignment on the new variation.
+        """
+        from app.backend.worker import RepairWorker, AlignmentWorker
+        from app.models.generation import RepairMode, RepairRequest
+
+        req = RepairRequest(
+            source_audio_path = result.audio_path,
+            mode              = RepairMode.REGION,
+            region_start_sec  = region_start,
+            region_end_sec    = region_end,
+            hint_prompt       = intended_word,
+            output_dir        = str(cfg.outputs_dir),
+        )
+        w = RepairWorker(self._pipeline, req)
+        w.result.connect(lambda repaired: self._on_word_repair_done(repaired, result))
+        w.error.connect(lambda msg: self.status_message.emit(f"Word repair failed: {msg}"))
+        w.start()
+        self._workers.append(w)
+        self.status_message.emit(f'Repairing "{intended_word}"…')
+
+    def _on_word_repair_done(
+        self,
+        repaired: list[GenerationResult],
+        source: GenerationResult,
+    ) -> None:
+        """After a word repair: add new card, carry lyrics forward, re-align."""
+        from app.backend.worker import AlignmentWorker
+        if not repaired:
+            return
+        new_result = repaired[0]
+        # Carry the original lyrics forward so alignment can run
+        new_result.lyrics = source.lyrics
+        new_result.style_prompt = source.style_prompt
+
+        self._empty_lbl.setVisible(False)
+        card = ResultCard(new_result)
+        card.stems_requested.connect(self._on_stems_requested)
+        card.download_wav.connect(self._on_download_wav)
+        card.download_mp3.connect(self._on_download_mp3)
+        card.repaint_requested.connect(
+            lambda res: self.open_in_repair.emit(res.audio_path)
+        )
+        card.repair_word_requested.connect(self._on_repair_word)
+        card.regenerate_section_requested.connect(self._on_regenerate_section)
+        self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
+        self._result_cards.append(card)
+
+        # Re-align the new variation in the background
+        aw = AlignmentWorker(new_result)
+        aw.aligned.connect(lambda r: self._on_alignment_done(r))
+        aw.start()
+        self._workers.append(aw)
+        self.status_message.emit("Word repaired — re-aligning…")
+
+    def _on_alignment_done(self, result: GenerationResult) -> None:
+        """Find the card for this result and refresh its timeline."""
+        card = next((c for c in self._result_cards if c.result is result), None)
+        if card:
+            card.refresh_alignment()
+        self.status_message.emit("Alignment updated.")
+
+    def _on_regenerate_section(
+        self,
+        result: GenerationResult,
+        section_start: float,
+        section_end: float,
+        section_label: str,
+    ) -> None:
+        """
+        Regenerate a single section from the lyric timeline (Phase 1.5).
+        Same region-repair route, with a 100ms crossfade at both boundaries
+        applied post-splice via scipy (handled in the worker's result callback).
+        """
+        from app.backend.worker import RepairWorker
+        from app.models.generation import RepairMode, RepairRequest
+
+        # Add 100ms padding on each side for the crossfade splice (§1.5)
+        CROSSFADE = 0.1
+        req = RepairRequest(
+            source_audio_path = result.audio_path,
+            mode              = RepairMode.REGION,
+            region_start_sec  = max(0.0, section_start - CROSSFADE),
+            region_end_sec    = section_end + CROSSFADE,
+            hint_prompt       = f"Regenerate {section_label}",
+            output_dir        = str(cfg.outputs_dir),
+        )
+        w = RepairWorker(self._pipeline, req)
+        w.result.connect(lambda repaired: self._on_word_repair_done(repaired, result))
+        w.error.connect(lambda msg: self.status_message.emit(f"Section regen failed: {msg}"))
+        w.start()
+        self._workers.append(w)
+        self.status_message.emit(f"Regenerating {section_label}…")
 
     def _on_error(self, msg: str) -> None:
         self._progress_bar.setVisible(False)
@@ -812,13 +1419,19 @@ class GeneratePage(QWidget):
         """Snapshot all current form values for preset saving."""
         mode = next(m for m, b in self._tab_btns.items() if b.isChecked())
         if mode == "text":
-            return {
+            params = {
                 "style_prompt":  self._style_prompt.toPlainText(),
                 "duration_secs": self._duration_spin.value(),
                 "variations":    self._variations_spin.value(),
                 "seed":          self._seed_input.text(),
                 "lora":          self._lora_combo.currentText(),
+                # Phase 2
+                "bpm":           self._bpm_slider.value() if hasattr(self, '_bpm_slider') else 0,
+                "key":           self._key_combo.currentText() if hasattr(self, '_key_combo') else "Free",
+                "time_signature": self._time_sig_combo.currentText() if hasattr(self, '_time_sig_combo') else "Free",
+                "exclusions":    self._exclusions.toPlainText() if hasattr(self, '_exclusions') else "",
             }
+            return params
         elif mode == "cover":
             return {
                 "target_style":    self._cover_prompt.toPlainText(),
@@ -852,6 +1465,19 @@ class GeneratePage(QWidget):
             if "lora"          in params:
                 idx = self._lora_combo.findText(params["lora"])
                 if idx >= 0: self._lora_combo.setCurrentIndex(idx)
+            # Phase 2
+            if "bpm" in params and hasattr(self, '_bpm_slider'):
+                self._bpm_slider.setValue(int(params.get("bpm") or 0))
+            if "key" in params and hasattr(self, '_key_combo'):
+                idx = self._key_combo.findText(params["key"])
+                if idx >= 0: self._key_combo.setCurrentIndex(idx)
+            if "time_signature" in params and hasattr(self, '_time_sig_combo'):
+                idx = self._time_sig_combo.findText(params["time_signature"])
+                if idx >= 0: self._time_sig_combo.setCurrentIndex(idx)
+            if "exclusions" in params and hasattr(self, '_exclusions'):
+                self._exclusions.setPlainText(params["exclusions"])
+                if params["exclusions"].strip():
+                    self._exclusions_toggle.setChecked(True)
         elif mode == "cover":
             if "target_style"    in params: self._cover_prompt.setPlainText(params["target_style"])
             if "new_lyrics"      in params: self._cover_lyrics.setPlainText(params["new_lyrics"])

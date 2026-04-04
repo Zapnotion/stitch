@@ -1,6 +1,6 @@
 """
 ui/widgets/result_card.py — A single generation result card widget.
-Shows waveform, controls, stem tray. Emits signals for parent to handle actions.
+Shows waveform, controls, stem tray, and lyric timeline. Emits signals for parent to handle actions.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from app.models.generation import GenerationResult
 from app.ui.widgets.audio_player import AudioPlayer
+from app.ui.widgets.lyric_timeline import LyricTimelineWidget
 from app.ui.widgets.waveform import WaveformWidget
 
 
@@ -24,6 +25,9 @@ class ResultCard(QWidget):
     download_mp3    = Signal(object)
     stems_requested = Signal(object)
     repaint_requested = Signal(object)
+    # Phase 1: word-level repair and section regen routed up to GeneratePage
+    repair_word_requested        = Signal(object, float, float, str)   # result, start, end, word
+    regenerate_section_requested = Signal(object, float, float, str)   # result, start, end, label
 
     def __init__(self, result: GenerationResult, parent=None) -> None:
         super().__init__(parent)
@@ -31,6 +35,7 @@ class ResultCard(QWidget):
         self._stems_visible = False
         self._build_ui()
         self._load_waveform()
+        self._try_load_alignment()
 
     # --- Build --------------------------------------------------------------
 
@@ -71,20 +76,38 @@ class ResultCard(QWidget):
 
         frame_layout.addLayout(top)
 
-        # --- Waveform ---
+        # --- Waveform (taller for easier interaction) ---
         self.waveform = WaveformWidget(selectable=False)
-        self.waveform.setFixedHeight(40)
+        self.waveform.setFixedHeight(56)
         frame_layout.addWidget(self.waveform)
 
         # --- Audio player ---
         self.player = AudioPlayer()
         frame_layout.addWidget(self.player)
 
-        # --- Action row ---
-        actions = QHBoxLayout()
-        actions.setSpacing(4)
+        # --- Primary action row: download buttons are prominent ---
+        primary_actions = QHBoxLayout()
+        primary_actions.setSpacing(6)
 
-        self.stems_btn = QPushButton("Stems ▾")
+        self.wav_btn = QPushButton("⬇ WAV")
+        self.wav_btn.setObjectName("DlBtn")
+        self.wav_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.wav_btn.clicked.connect(lambda: self.download_wav.emit(self.result))
+
+        self.mp3_btn = QPushButton("⬇ MP3")
+        self.mp3_btn.setObjectName("DlBtn")
+        self.mp3_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.mp3_btn.clicked.connect(lambda: self.download_mp3.emit(self.result))
+
+        primary_actions.addWidget(self.wav_btn)
+        primary_actions.addWidget(self.mp3_btn)
+        frame_layout.addLayout(primary_actions)
+
+        # --- Secondary action row: utility actions, smaller weight ---
+        secondary_actions = QHBoxLayout()
+        secondary_actions.setSpacing(4)
+
+        self.stems_btn = QPushButton("Stems")
         self.stems_btn.setObjectName("ActionBtn")
         self.stems_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.stems_btn.clicked.connect(self._on_stems)
@@ -94,20 +117,9 @@ class ResultCard(QWidget):
         self.repaint_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.repaint_btn.clicked.connect(lambda: self.repaint_requested.emit(self.result))
 
-        self.wav_btn = QPushButton("⬇ WAV")
-        self.wav_btn.setObjectName("ActionBtn")
-        self.wav_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.wav_btn.clicked.connect(lambda: self.download_wav.emit(self.result))
-
-        self.mp3_btn = QPushButton("⬇ MP3")
-        self.mp3_btn.setObjectName("ActionBtn")
-        self.mp3_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.mp3_btn.clicked.connect(lambda: self.download_mp3.emit(self.result))
-
-        for btn in [self.stems_btn, self.repaint_btn, self.wav_btn, self.mp3_btn]:
-            actions.addWidget(btn)
-
-        frame_layout.addLayout(actions)
+        secondary_actions.addWidget(self.stems_btn)
+        secondary_actions.addWidget(self.repaint_btn)
+        frame_layout.addLayout(secondary_actions)
 
         # --- Stems tray (hidden by default) ---
         self.stems_tray = QWidget()
@@ -127,6 +139,24 @@ class ResultCard(QWidget):
 
         frame_layout.addWidget(self.stems_tray)
 
+        # --- Lyric timeline (Phase 1) — hidden until alignment sidecar exists ---
+        self._timeline_divider = QFrame()
+        self._timeline_divider.setObjectName("Divider")
+        self._timeline_divider.setFixedHeight(1)
+        self._timeline_divider.setVisible(False)
+        frame_layout.addWidget(self._timeline_divider)
+
+        self.timeline = LyricTimelineWidget()
+        self.timeline.setVisible(False)
+        self.timeline.seek_requested.connect(self._on_timeline_seek)
+        self.timeline.repair_word_requested.connect(
+            lambda s, e, w: self.repair_word_requested.emit(self.result, s, e, w)
+        )
+        self.timeline.regenerate_section_requested.connect(
+            lambda s, e, lbl: self.regenerate_section_requested.emit(self.result, s, e, lbl)
+        )
+        frame_layout.addWidget(self.timeline)
+
         root.addWidget(frame)
 
     def _load_waveform(self) -> None:
@@ -141,6 +171,52 @@ class ResultCard(QWidget):
             self.player.playback_stopped.connect(
                 lambda _: self.waveform.set_playhead(-1.0)
             )
+            # Drive lyric timeline position from player
+            self.player._scrub.valueChanged.connect(self._on_scrub_for_timeline)
+            self.player.playback_stopped.connect(lambda _: self.timeline.stop_tracking())
+
+    def _on_scrub_for_timeline(self, slider_val: int) -> None:
+        """Convert scrub slider position (0–1000) to seconds and push to timeline."""
+        dur_ms = self.player._player.duration()
+        if dur_ms > 0:
+            sec = slider_val / 1000.0 * dur_ms / 1000.0
+            self.timeline.set_position(sec)
+
+    def _on_timeline_seek(self, sec: float) -> None:
+        """Seek the audio player to a time in seconds (from timeline click)."""
+        dur_ms = self.player._player.duration()
+        if dur_ms > 0:
+            target_ms = int(sec * 1000)
+            self.player._player.setPosition(target_ms)
+
+    def _try_load_alignment(self) -> None:
+        """
+        Load the alignment sidecar if it already exists alongside the audio file.
+        Called at card construction time; also callable after a fresh alignment run.
+        """
+        from app.backend.aligner import read_sidecar
+        sidecar = None
+        # Prefer path stored on the result (set by AlignmentWorker)
+        if self.result.alignment_path:
+            from pathlib import Path
+            import json
+            try:
+                with open(self.result.alignment_path, "r", encoding="utf-8") as f:
+                    sidecar = json.load(f)
+            except (OSError, ValueError):
+                pass
+        # Fall back to scanning next to the audio file
+        if sidecar is None:
+            sidecar = read_sidecar(self.result.audio_path)
+
+        if sidecar:
+            self.timeline.load_alignment(sidecar)
+            self.timeline.setVisible(True)
+            self._timeline_divider.setVisible(True)
+
+    def refresh_alignment(self) -> None:
+        """Called by GeneratePage after AlignmentWorker finishes on this result."""
+        self._try_load_alignment()
 
     # --- Stem display -------------------------------------------------------
 
@@ -196,6 +272,7 @@ class ResultCard(QWidget):
         self.stems_tray.setVisible(True)
         self._stems_visible = True
         self.stems_btn.setText("Stems ▴")
+        self.stems_btn.setObjectName("ActionBtnActive")
 
     def _download_stem(self, path: str) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -218,6 +295,9 @@ class ResultCard(QWidget):
             self.stems_tray.setVisible(False)
             self._stems_visible = False
             self.stems_btn.setText("Stems ▾")
+            self.stems_btn.setObjectName("ActionBtn")
+            self.stems_btn.style().unpolish(self.stems_btn)
+            self.stems_btn.style().polish(self.stems_btn)
         elif self.result.stems:
             self.populate_stems(self.result.stems)
         else:
@@ -228,3 +308,6 @@ class ResultCard(QWidget):
     def enable_stems_btn(self) -> None:
         self.stems_btn.setEnabled(True)
         self.stems_btn.setText("Stems ▾")
+        self.stems_btn.setObjectName("ActionBtn")
+        self.stems_btn.style().unpolish(self.stems_btn)
+        self.stems_btn.style().polish(self.stems_btn)

@@ -318,6 +318,10 @@ class MainWindow(QMainWindow):
                 background: #1A1A1A;
                 border-right: 1px solid #2A2A2A;
             }
+            #LeftPanel QScrollArea, #LeftPanel QScrollArea > QWidget > QWidget {
+                background: #1A1A1A;
+                border: none;
+            }
             #RightPanel { background: #141414; }
             #RightHeader {
                 background: #1A1A1A;
@@ -483,10 +487,64 @@ class MainWindow(QMainWindow):
             }
             #ActionBtn:hover { background: #242424; color: #CCC; }
 
+            /* Active state for Stems button when tray is open */
+            #ActionBtnActive {
+                border: 1px solid #2A5A8E;
+                border-radius: 5px;
+                background: #172C47;
+                color: #7EC2F8;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+            #ActionBtnActive:hover { background: #1B3A5E; }
+
+            /* Primary download buttons on result cards */
+            #DlBtn {
+                border: 1px solid #2E4A2E;
+                border-radius: 5px;
+                background: #1A2E1A;
+                color: #7EC878;
+                padding: 5px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            #DlBtn:hover { background: #223822; border-color: #4A9E4A; }
+
             #StemsTray  { background: #161616; border-top: 1px solid #222; padding: 8px; }
             #StemsHeader { font-size: 10px; font-weight: 600; color: #555; letter-spacing: 0.05em; }
             #StemLabel  { font-size: 11px; color: #888; }
             #StemDlBtn  { font-size: 10px; border: 1px solid #2A2A2A; border-radius: 4px; background: #1A1A1A; color: #777; }
+
+            /* Lyric timeline (Phase 1) */
+            #LyricTimeline {
+                background: #111111;
+                border: none;
+                border-top: 1px solid #222;
+                color: #DEDEDE;
+                font-family: "Segoe UI", system-ui, sans-serif;
+                font-size: 13px;
+                line-height: 1.8;
+                padding: 8px 10px;
+            }
+
+            /* Confidence flagging banner */
+            #ConfidenceBanner {
+                background: #2A1E00;
+                border-top: 1px solid #4A3800;
+                border-bottom: 1px solid #4A3800;
+            }
+            #BannerLabel {
+                font-size: 11px;
+                color: #D4A84B;
+                cursor: pointer;
+            }
+            #BannerDismiss {
+                background: transparent;
+                border: none;
+                color: #666;
+                font-size: 13px;
+            }
+            #BannerDismiss:hover { color: #AAA; }
 
             /* Repair page */
             #WaveformArea { background: #141414; }
@@ -612,6 +670,74 @@ class MainWindow(QMainWindow):
                 letter-spacing: 0.08em;
                 text-transform: uppercase;
             }
+
+            /* Inline "Advanced" disclosure toggle (AI slider reveal) */
+            #AdvancedToggle {
+                background: transparent;
+                border: none;
+                color: #555;
+                font-size: 11px;
+                padding: 2px 0;
+                text-align: left;
+            }
+            #AdvancedToggle:hover   { color: #888; }
+            #AdvancedToggle:checked { color: #AAA; }
+
+            /* Phase 2: section pills in structure builder */
+            #SectionPill {
+                background: #1E1E1E;
+                border: 1px solid #2E2E2E;
+                border-radius: 6px;
+            }
+            #PillTypeCombo, #PillEnergyCombo, #PillMoodCombo {
+                background: #181818;
+                border: 1px solid #2A2A2A;
+                border-radius: 4px;
+                color: #CCC;
+                font-size: 11px;
+                padding: 2px 4px;
+            }
+            #PillLyricsToggle {
+                background: transparent;
+                border: none;
+                color: #555;
+                font-size: 10px;
+                text-align: left;
+                padding: 0;
+            }
+            #PillLyricsToggle:hover { color: #888; }
+            #PillLyricsBox {
+                background: #141414;
+                border: 1px solid #2A2A2A;
+                border-radius: 4px;
+                color: #CCC;
+                font-size: 11px;
+                padding: 4px;
+            }
+            #PillRemoveBtn {
+                background: transparent;
+                border: none;
+                color: #444;
+                font-size: 12px;
+            }
+            #PillRemoveBtn:hover { color: #E05555; }
+            #PillAddBtn {
+                background: #1E1E1E;
+                border: 1px solid #2E2E2E;
+                border-radius: 5px;
+                color: #555;
+                font-size: 16px;
+            }
+            #PillAddBtn:hover { background: #252525; color: #AAA; }
+            #PresetChipBtn {
+                border: 1px solid #2A2A2A;
+                border-radius: 9px;
+                background: transparent;
+                color: #777;
+                padding: 2px 8px;
+                font-size: 10px;
+            }
+            #PresetChipBtn:hover { border-color: #444; color: #BBB; }
             #SavePresetBtn {
                 background: #1E1E1E;
                 border: 1px solid #2E2E2E;

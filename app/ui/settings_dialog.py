@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSpinBox,
+    QPushButton, QScrollArea, QSlider, QSpinBox,
     QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -84,6 +84,52 @@ class SettingsDialog(QDialog):
         self._sample_rate = QComboBox()
         self._sample_rate.addItems(["44100", "48000", "22050"])
         form.addRow("Sample rate:", self._sample_rate)
+
+        # --- Lyric alignment (Phase 1) ---
+        form.addRow(self._divider())
+
+        from app.backend.aligner import ALIGNMENT_AVAILABLE
+        if not ALIGNMENT_AVAILABLE:
+            from PySide6.QtWidgets import QLabel as _QLabel
+            warn = _QLabel(
+                "whisper-timestamped not installed.\n"
+                "Lyric alignment and timeline features are unavailable.\n"
+                "Run run.bat to install all dependencies."
+            )
+            warn.setObjectName("WarnBox")
+            warn.setWordWrap(True)
+            form.addRow(warn)
+
+        align_hdr = QLabel("Lyric alignment")
+        align_hdr.setObjectName("GroupLabel")
+        form.addRow(align_hdr)
+
+        # Confidence threshold slider
+        threshold_row = QHBoxLayout()
+        self._confidence_threshold = QSlider(Qt.Horizontal)
+        self._confidence_threshold.setRange(0, 10)   # mapped: value/10 → 0.0–1.0
+        self._confidence_threshold.setValue(6)         # default 0.6
+        self._confidence_threshold.setObjectName("LyricsSlider")
+        self._confidence_threshold_lbl = QLabel("0.6")
+        self._confidence_threshold_lbl.setFixedWidth(28)
+        self._confidence_threshold.valueChanged.connect(
+            lambda v: self._confidence_threshold_lbl.setText(f"{v/10:.1f}")
+        )
+        threshold_row.addWidget(self._confidence_threshold)
+        threshold_row.addWidget(self._confidence_threshold_lbl)
+        form.addRow("Flag words below confidence:", threshold_row)
+
+        # Whisper model size
+        self._whisper_model = QComboBox()
+        self._whisper_model.addItems(["tiny", "base", "small", "medium"])
+        self._whisper_model.setToolTip(
+            "Whisper model used for lyric alignment.\n"
+            "tiny: ~39 MB, fastest, lower accuracy.\n"
+            "base: ~150 MB, recommended balance.\n"
+            "small: ~490 MB, more accurate, slower.\n"
+            "medium: ~1.5 GB, best accuracy, slow on CPU."
+        )
+        form.addRow("Alignment model:", self._whisper_model)
 
         return w
 
@@ -316,6 +362,14 @@ class SettingsDialog(QDialog):
         self._device.setCurrentText(cfg.get("device", "auto"))
         self._sample_rate.setCurrentText(str(cfg.get("default_sample_rate", "44100")))
 
+        # Alignment (Phase 1)
+        threshold = cfg.get("alignment_confidence_threshold", 0.6)
+        self._confidence_threshold.setValue(int(round(threshold * 10)))
+        self._confidence_threshold_lbl.setText(f"{threshold:.1f}")
+        whisper_idx = self._whisper_model.findText(cfg.get("whisper_model", "base"))
+        if whisper_idx >= 0:
+            self._whisper_model.setCurrentIndex(whisper_idx)
+
         self._outputs_dir.setText(str(cfg.outputs_dir))
         self._inputs_dir.setText(str(cfg.inputs_dir))
         self._models_dir.setText(str(cfg.models_dir))
@@ -345,6 +399,9 @@ class SettingsDialog(QDialog):
             "default_duration":    self._default_duration.value(),
             "device":              self._device.currentText(),
             "default_sample_rate": int(self._sample_rate.currentText()),
+            # Alignment (Phase 1)
+            "alignment_confidence_threshold": self._confidence_threshold.value() / 10.0,
+            "whisper_model":       self._whisper_model.currentText(),
             "outputs_dir":         self._outputs_dir.text(),
             "inputs_dir":          self._inputs_dir.text(),
             "models_dir":          self._models_dir.text(),
