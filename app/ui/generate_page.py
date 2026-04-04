@@ -69,7 +69,8 @@ class GeneratePage(QWidget):
         # --- Left panel ---
         left = QWidget()
         left.setObjectName("LeftPanel")
-        left.setFixedWidth(320)
+        left.setMinimumWidth(300)
+        left.setMaximumWidth(600)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
@@ -163,7 +164,7 @@ class GeneratePage(QWidget):
         hdr = QWidget()
         hdr.setObjectName("RightHeader")
         hdr_layout = QHBoxLayout(hdr)
-        hdr_layout.setContentsMargins(14, 10, 14, 10)
+        hdr_layout.setContentsMargins(16, 12, 16, 12)
         self._results_title = QLabel("Results")
         self._results_title.setObjectName("RightTitle")
         self._results_sub = QLabel("text prompt · 4 variations")
@@ -206,8 +207,8 @@ class GeneratePage(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
         self._cards_widget = QWidget()
         self._cards_layout = QVBoxLayout(self._cards_widget)
-        self._cards_layout.setContentsMargins(12, 12, 12, 12)
-        self._cards_layout.setSpacing(8)
+        self._cards_layout.setContentsMargins(14, 14, 14, 14)
+        self._cards_layout.setSpacing(10)
         self._cards_layout.addStretch()
 
         # Empty state
@@ -220,7 +221,11 @@ class GeneratePage(QWidget):
         right_layout.addWidget(scroll, 1)
 
         splitter.addWidget(right)
-        splitter.setSizes([320, 600])
+        splitter.setSizes([340, 720])
+        splitter.setStretchFactor(0, 0)   # left: don't auto-stretch
+        splitter.setStretchFactor(1, 1)   # right: takes all extra space
+        splitter.setHandleWidth(4)         # visible drag handle
+        splitter.setChildrenCollapsible(False)
 
         root.addWidget(splitter)
 
@@ -229,8 +234,8 @@ class GeneratePage(QWidget):
     def _build_text_panel(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(10)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(12)
 
         lay.addWidget(self._field_label("Output type"))
         self._output_type_row = self._pill_row(["With vocals", "Instrumental"])
@@ -652,7 +657,7 @@ class GeneratePage(QWidget):
         bpm_row.addWidget(bpm_lbl)
 
         self._bpm_slider = QSlider(Qt.Horizontal)
-        self._bpm_slider.setRange(0, 200)   # 0 = free
+        self._bpm_slider.setRange(0, 200)   # 0 = free; 1–39 clamped to 40 on release
         self._bpm_slider.setValue(0)
         self._bpm_slider.setObjectName("LyricsSlider")
         bpm_row.addWidget(self._bpm_slider, 1)
@@ -753,11 +758,15 @@ class GeneratePage(QWidget):
     _BPM_SNAPS = [60, 80, 90, 100, 120, 140, 160]
 
     def _on_bpm_changed(self, val: int) -> None:
-        self._bpm_lbl.setText("Free" if val == 0 else str(val))
+        self._bpm_lbl.setText("Free" if val == 0 else str(max(40, val)))
 
     def _snap_bpm(self) -> None:
         val = self._bpm_slider.value()
         if val == 0:
+            return
+        # Clamp to valid BPM floor (brief says 40–200; values 1–39 are nonsensical)
+        if val < 40:
+            self._bpm_slider.setValue(40)
             return
         closest = min(self._BPM_SNAPS, key=lambda s: abs(s - val))
         if abs(closest - val) <= 6:
@@ -1060,7 +1069,8 @@ class GeneratePage(QWidget):
         ) else OutputType.WITH_VOCALS
 
         # Phase 2.1: Musical parameters
-        bpm_val = self._bpm_slider.value() if hasattr(self, '_bpm_slider') else 0
+        _raw_bpm = self._bpm_slider.value() if hasattr(self, '_bpm_slider') else 0
+        bpm_val = _raw_bpm if _raw_bpm == 0 else max(40, _raw_bpm)
         key_val = self._key_combo.currentText() if hasattr(self, '_key_combo') else "Free"
         ts_val  = self._time_sig_combo.currentText() if hasattr(self, '_time_sig_combo') else "Free"
 
@@ -1179,6 +1189,8 @@ class GeneratePage(QWidget):
                 seed            = r.seed,
                 variation_index = r.variation_index,
                 style_prompt    = r.style_prompt,
+                alignment_path  = r.alignment_path or "",
+                starred         = r.starred,
             )
             card = ResultCard(r)
             card.stems_requested.connect(self._on_stems_requested)
@@ -1191,8 +1203,45 @@ class GeneratePage(QWidget):
             # Phase 1: word repair and section regeneration from lyric timeline
             card.repair_word_requested.connect(self._on_repair_word)
             card.regenerate_section_requested.connect(self._on_regenerate_section)
+            # Phase 3: wire mix_rendered so rendered mixes appear as new result cards
+            card.mix_rendered.connect(self._on_mix_rendered)
             self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
             self._result_cards.append(card)
+
+    def _on_mix_rendered(self, source: GenerationResult, mix_path: str) -> None:
+        """Create a new result card for a custom stem mix (Phase 3)."""
+        from app.models.generation import GenerationMode
+        import time as _time
+        mix_result = GenerationResult(
+            variation_index = len(self._result_cards) + 1,
+            audio_path      = mix_path,
+            seed            = source.seed,
+            duration_secs   = source.duration_secs,
+            mode            = source.mode,
+            style_prompt    = source.style_prompt,
+            lyrics          = source.lyrics,
+        )
+        session.record(
+            mode            = mix_result.mode.value,
+            audio_path      = mix_result.audio_path,
+            duration_secs   = mix_result.duration_secs,
+            seed            = mix_result.seed,
+            variation_index = mix_result.variation_index,
+            style_prompt    = f"[Custom mix] {mix_result.style_prompt}",
+        )
+        self._empty_lbl.setVisible(False)
+        card = ResultCard(mix_result)
+        card.stems_requested.connect(self._on_stems_requested)
+        card.download_wav.connect(self._on_download_wav)
+        card.download_mp3.connect(self._on_download_mp3)
+        card.repaint_requested.connect(lambda res: self.open_in_repair.emit(res.audio_path))
+        card.star_toggled.connect(lambda _: self._apply_sort())
+        card.repair_word_requested.connect(self._on_repair_word)
+        card.regenerate_section_requested.connect(self._on_regenerate_section)
+        card.mix_rendered.connect(self._on_mix_rendered)
+        self._cards_layout.insertWidget(self._cards_layout.count() - 1, card)
+        self._result_cards.append(card)
+        self.status_message.emit(f"Custom mix saved → {Path(mix_path).name}")
 
     def _on_repair_word(
         self,
@@ -1219,22 +1268,95 @@ class GeneratePage(QWidget):
             output_dir        = str(cfg.outputs_dir),
         )
         w = RepairWorker(self._pipeline, req)
-        w.result.connect(lambda repaired: self._on_word_repair_done(repaired, result))
+        w.result.connect(lambda repaired, rs=region_start, re=region_end:
+                         self._on_word_repair_done(repaired, result, rs, re))
         w.error.connect(lambda msg: self.status_message.emit(f"Word repair failed: {msg}"))
         w.start()
         self._workers.append(w)
         self.status_message.emit(f'Repairing "{intended_word}"…')
 
+    @staticmethod
+    def _splice_word_repair(
+        source: GenerationResult,
+        repaired_path: str,
+        region_start: float,
+        region_end: float,
+    ) -> str:
+        """
+        Splice the repaired region back into the source audio (Bug 5 fix).
+        Returns the path of the spliced file, or repaired_path on failure.
+        Mirrors the splice logic in _ace_worker_v15._splice_repair but runs
+        on the UI side for word/section repairs that go through RepairWorker.
+        """
+        import uuid
+        try:
+            import soundfile as sf
+            import numpy as np
+            from pathlib import Path as _P
+
+            orig,    sr_o = sf.read(source.audio_path, dtype="float32", always_2d=True)
+            repaired_arr, sr_r = sf.read(repaired_path, dtype="float32", always_2d=True)
+
+            if sr_o != sr_r:
+                return repaired_path
+
+            start_s = max(0, min(int(round(region_start * sr_o)), len(orig)))
+            end_s   = max(start_s, min(int(round(region_end   * sr_o)), len(orig)))
+            region_len = end_s - start_s
+            if region_len <= 0:
+                return repaired_path
+
+            # Match channel count
+            if orig.shape[1] != repaired_arr.shape[1]:
+                n = max(orig.shape[1], repaired_arr.shape[1])
+                if orig.shape[1] < n:
+                    orig = np.repeat(orig, n, axis=1)
+                if repaired_arr.shape[1] < n:
+                    repaired_arr = np.repeat(repaired_arr, n, axis=1)
+
+            rep_start = min(start_s, len(repaired_arr))
+            rep_end   = min(end_s,   len(repaired_arr))
+            patch = repaired_arr[rep_start:rep_end]
+            if len(patch) < region_len:
+                patch = np.concatenate([
+                    patch,
+                    np.zeros((region_len - len(patch), orig.shape[1]), dtype=np.float32)
+                ])
+
+            spliced = orig.copy()
+            spliced[start_s:end_s] = patch[:region_len]
+
+            out_dir  = _P(source.audio_path).parent
+            out_name = f"{_P(source.audio_path).stem}_patched_{uuid.uuid4().hex[:6]}.wav"
+            out_path = str(out_dir / out_name)
+            sf.write(out_path, spliced, sr_o)
+            return out_path
+        except Exception as exc:
+            from app.backend.logger import log
+            log.warning(f"[word_repair_splice] {exc} — using raw repaired file")
+            return repaired_path
+
     def _on_word_repair_done(
         self,
         repaired: list[GenerationResult],
         source: GenerationResult,
+        region_start: float = 0.0,
+        region_end: float = 0.0,
     ) -> None:
-        """After a word repair: add new card, carry lyrics forward, re-align."""
+        """After a word repair: splice region back, add new card, re-align."""
         from app.backend.worker import AlignmentWorker
         if not repaired:
             return
         new_result = repaired[0]
+
+        # Splice the repaired region into the source audio (Bug 5).
+        # Only splice for region repairs where we have valid timestamps.
+        if region_end > region_start and source.audio_path:
+            spliced_path = self._splice_word_repair(
+                source, new_result.audio_path, region_start, region_end
+            )
+            new_result.audio_path = spliced_path
+
         # Carry the original lyrics forward so alignment can run
         new_result.lyrics = source.lyrics
         new_result.style_prompt = source.style_prompt
@@ -1292,7 +1414,11 @@ class GeneratePage(QWidget):
             output_dir        = str(cfg.outputs_dir),
         )
         w = RepairWorker(self._pipeline, req)
-        w.result.connect(lambda repaired: self._on_word_repair_done(repaired, result))
+        # Pass the padded region coords so _on_word_repair_done can splice correctly
+        regen_start = max(0.0, section_start - CROSSFADE)
+        regen_end   = section_end + CROSSFADE
+        w.result.connect(lambda repaired, rs=regen_start, re=regen_end:
+                         self._on_word_repair_done(repaired, result, rs, re))
         w.error.connect(lambda msg: self.status_message.emit(f"Section regen failed: {msg}"))
         w.start()
         self._workers.append(w)
@@ -1426,7 +1552,7 @@ class GeneratePage(QWidget):
                 "seed":          self._seed_input.text(),
                 "lora":          self._lora_combo.currentText(),
                 # Phase 2
-                "bpm":           self._bpm_slider.value() if hasattr(self, '_bpm_slider') else 0,
+                "bpm":           (lambda v: 0 if v < 40 else v)(self._bpm_slider.value()) if hasattr(self, '_bpm_slider') else 0,
                 "key":           self._key_combo.currentText() if hasattr(self, '_key_combo') else "Free",
                 "time_signature": self._time_sig_combo.currentText() if hasattr(self, '_time_sig_combo') else "Free",
                 "exclusions":    self._exclusions.toPlainText() if hasattr(self, '_exclusions') else "",

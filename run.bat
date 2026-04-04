@@ -110,7 +110,46 @@ if errorlevel 1 (
 :whisper_done
 
 :: ---------------------------------------------------------------------------
-:: 3. Model venv (.venv_model)
+:: 2d. pyloudnorm (broadcast loudness normalisation — Phase 3)
+:: ---------------------------------------------------------------------------
+echo  [Step 1d/4] Checking pyloudnorm...
+"%VENV_PY%" -c "import pyloudnorm" >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] pyloudnorm already installed
+    goto :pyloudnorm_done
+)
+echo [..] Installing pyloudnorm...
+"%VENV_PY%" -m pip install pyloudnorm --upgrade --quiet
+"%VENV_PY%" -c "import pyloudnorm" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] pyloudnorm install failed. Loudness normalisation will use RMS fallback.
+) else (
+    echo [OK] pyloudnorm ready
+)
+:pyloudnorm_done
+
+:: ---------------------------------------------------------------------------
+:: 2e. pyrubberband (vocal pitch correction — Phase 3)
+::     Needs the rubberband CLI on PATH or rubberband.dll bundled in app/libs/.
+::     Falls back to librosa.effects.pitch_shift if not importable.
+:: ---------------------------------------------------------------------------
+echo  [Step 1e/4] Checking pyrubberband...
+"%VENV_PY%" -c "import pyrubberband" >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] pyrubberband already installed
+    goto :pyrubberband_done
+)
+echo [..] Installing pyrubberband...
+"%VENV_PY%" -m pip install pyrubberband --upgrade --quiet
+"%VENV_PY%" -c "import pyrubberband" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] pyrubberband install failed. Pitch correction will fall back to librosa.
+) else (
+    echo [OK] pyrubberband ready
+)
+:pyrubberband_done
+
+
 :: ---------------------------------------------------------------------------
 echo.
 echo  [Step 2/4] Setting up model environment...

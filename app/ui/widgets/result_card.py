@@ -28,6 +28,8 @@ class ResultCard(QWidget):
     # Phase 1: word-level repair and section regen routed up to GeneratePage
     repair_word_requested        = Signal(object, float, float, str)   # result, start, end, word
     regenerate_section_requested = Signal(object, float, float, str)   # result, start, end, label
+    # Phase 3: mix rendered — carries the new audio path
+    mix_rendered = Signal(object, str)   # (GenerationResult, new_audio_path)
 
     def __init__(self, result: GenerationResult, parent=None) -> None:
         super().__init__(parent)
@@ -117,8 +119,16 @@ class ResultCard(QWidget):
         self.repaint_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.repaint_btn.clicked.connect(lambda: self.repaint_requested.emit(self.result))
 
+        # Phase 3: Mixer button — only visible once stems exist
+        self.mixer_btn = QPushButton("🎚 Mixer")
+        self.mixer_btn.setObjectName("ActionBtn")
+        self.mixer_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.mixer_btn.setVisible(False)
+        self.mixer_btn.clicked.connect(self._on_mixer)
+
         secondary_actions.addWidget(self.stems_btn)
         secondary_actions.addWidget(self.repaint_btn)
+        secondary_actions.addWidget(self.mixer_btn)
         frame_layout.addLayout(secondary_actions)
 
         # --- Stems tray (hidden by default) ---
@@ -138,6 +148,19 @@ class ResultCard(QWidget):
         stems_layout.addLayout(self._stems_rows_layout)
 
         frame_layout.addWidget(self.stems_tray)
+
+        # --- Stem Mixer panel (Phase 3) — hidden until mixer button clicked ---
+        self._mixer_divider = QFrame()
+        self._mixer_divider.setObjectName("Divider")
+        self._mixer_divider.setFixedHeight(1)
+        self._mixer_divider.setVisible(False)
+        frame_layout.addWidget(self._mixer_divider)
+
+        self._mixer_panel = None  # lazy-created on first open
+        self._mixer_panel_placeholder = QWidget()
+        self._mixer_panel_placeholder.setVisible(False)
+        frame_layout.addWidget(self._mixer_panel_placeholder)
+        self._frame_layout_ref = frame_layout  # keep ref for lazy insertion
 
         # --- Lyric timeline (Phase 1) — hidden until alignment sidecar exists ---
         self._timeline_divider = QFrame()
@@ -174,6 +197,10 @@ class ResultCard(QWidget):
             # Drive lyric timeline position from player
             self.player._scrub.valueChanged.connect(self._on_scrub_for_timeline)
             self.player.playback_stopped.connect(lambda _: self.timeline.stop_tracking())
+
+        # Phase 3: show mixer button if stems are already populated (e.g. from session restore)
+        if self.result.stems:
+            self.mixer_btn.setVisible(True)
 
     def _on_scrub_for_timeline(self, slider_val: int) -> None:
         """Convert scrub slider position (0–1000) to seconds and push to timeline."""
@@ -273,6 +300,41 @@ class ResultCard(QWidget):
         self._stems_visible = True
         self.stems_btn.setText("Stems ▴")
         self.stems_btn.setObjectName("ActionBtnActive")
+
+        # Phase 3: reveal mixer button now that stems exist
+        self.mixer_btn.setVisible(True)
+
+    def _on_mixer(self) -> None:
+        """Toggle the stem mixer panel open/closed (Phase 3)."""
+        from app.ui.widgets.stem_mixer import StemMixerPanel
+
+        if self._mixer_panel is None:
+            # Lazy-create and insert before the placeholder
+            self._mixer_panel = StemMixerPanel(self.result)
+            self._mixer_panel.mix_rendered.connect(
+                lambda path: self.mix_rendered.emit(self.result, path)
+            )
+            lay = self._frame_layout_ref
+            idx = lay.indexOf(self._mixer_panel_placeholder)
+            lay.insertWidget(idx, self._mixer_panel)
+            self._mixer_divider.setVisible(True)
+            self._mixer_panel.setVisible(True)
+            self.mixer_btn.setText("🎚 Mixer ▴")
+            self.mixer_btn.setObjectName("ActionBtnActive")
+            self.mixer_btn.style().unpolish(self.mixer_btn)
+            self.mixer_btn.style().polish(self.mixer_btn)
+        else:
+            visible = not self._mixer_panel.isVisible()
+            self._mixer_panel.setVisible(visible)
+            self._mixer_divider.setVisible(visible)
+            if visible:
+                self.mixer_btn.setText("🎚 Mixer ▴")
+                self.mixer_btn.setObjectName("ActionBtnActive")
+            else:
+                self.mixer_btn.setText("🎚 Mixer")
+                self.mixer_btn.setObjectName("ActionBtn")
+            self.mixer_btn.style().unpolish(self.mixer_btn)
+            self.mixer_btn.style().polish(self.mixer_btn)
 
     def _download_stem(self, path: str) -> None:
         from PySide6.QtWidgets import QFileDialog

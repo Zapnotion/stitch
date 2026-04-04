@@ -37,6 +37,8 @@ class HistoryEntry:
     variation_index: int
     style_prompt:    str
     params:          dict       # full request params snapshot
+    alignment_path:  str        = ""   # path to .alignment.json sidecar; "" = none
+    starred:         bool       = False
 
 
 class SessionHistory:
@@ -57,6 +59,8 @@ class SessionHistory:
         variation_index: int,
         style_prompt:    str,
         params:          dict | None = None,
+        alignment_path:  str = "",
+        starred:         bool = False,
     ) -> None:
         entry = HistoryEntry(
             timestamp       = time.time(),
@@ -67,6 +71,8 @@ class SessionHistory:
             variation_index = variation_index,
             style_prompt    = style_prompt,
             params          = params or {},
+            alignment_path  = alignment_path or "",
+            starred         = starred,
         )
         self._append(entry)
 

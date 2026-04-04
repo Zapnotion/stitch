@@ -435,13 +435,27 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
 
                 user_bpm = p.get("bpm")
                 user_key = p.get("key", "").strip()
-                base.update(f(
+
+                # Always embed BPM and key as text in the caption so the DiT's
+                # text encoder sees them even when the GenerationParams field
+                # doesn't exist in this ACEStep install (f() would silently drop it).
+                effective_bpm = int(user_bpm) if user_bpm else getattr(sample, "bpm", None)
+                effective_key = user_key if user_key else (getattr(sample, "keyscale", "") or "")
+                if effective_bpm:
+                    caption_out = f"{caption_out}, {effective_bpm} BPM"
+                if effective_key and effective_key not in caption_out:
+                    caption_out = f"{caption_out}, {effective_key}"
+
+                param_update = f(
                     caption        = caption_out,
                     lyrics         = lyrics_out,
-                    bpm            = int(user_bpm) if user_bpm else sample.bpm,
-                    keyscale       = user_key     if user_key  else sample.keyscale,
-                    vocal_language = sample.language,
-                ))
+                    vocal_language = getattr(sample, "language", None),
+                )
+                if effective_bpm:
+                    param_update.update(f(bpm=effective_bpm))
+                if effective_key:
+                    param_update.update(f(keyscale=effective_key))
+                base.update({k: v for k, v in param_update.items() if v is not None})
             else:
                 caption_fb = p.get("style_prompt", "")
                 time_sig   = p.get("time_signature", "").strip()
@@ -450,12 +464,17 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
                     caption_fb = f"{caption_fb}, {time_sig} time signature".lstrip(", ")
                 if excl:
                     caption_fb = f"{caption_fb}. Avoid: {excl}".lstrip(". ")
+                user_bpm = p.get("bpm")
+                user_key = p.get("key", "").strip()
+                # Embed BPM and key in caption text as fallback (same rationale as above)
+                if user_bpm:
+                    caption_fb = f"{caption_fb}, {int(user_bpm)} BPM"
+                if user_key:
+                    caption_fb = f"{caption_fb}, {user_key}"
                 base.update(f(
                     caption = caption_fb,
                     lyrics  = "[Instrumental]" if instrumental else VOCAL_SCAFFOLD,
                 ))
-                user_bpm = p.get("bpm")
-                user_key = p.get("key", "").strip()
                 if user_bpm:
                     base.update(f(bpm=int(user_bpm)))
                 if user_key:
@@ -517,13 +536,26 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
         ))
 
     elif mode == "repair":
+        repair_mode   = p.get("repair_mode", "region")
+        region_start  = float(p.get("region_start", 0.0))
+        source_audio  = p.get("source_audio")
+        # For full-file repair, span the whole track.
+        # For region repair, use the supplied end; guard against end=0 (unset).
+        if repair_mode == "full_file" or float(p.get("region_end", 0.0)) <= region_start:
+            try:
+                import soundfile as _sf
+                region_end = _sf.info(source_audio).duration if source_audio else 30.0
+            except Exception:
+                region_end = 30.0
+        else:
+            region_end = float(p.get("region_end"))
         base.update(f(
             caption          = p.get("hint_prompt") or "",
             lyrics           = "",
-            reference_audio  = p.get("source_audio"),
+            reference_audio  = source_audio,
             task             = "repaint",
-            repaint_start    = float(p.get("region_start", 0.0)),
-            repaint_end      = float(p.get("region_end", 30.0)),
+            repaint_start    = region_start,
+            repaint_end      = region_end,
         ))
 
     # Infer steps — turbo default is 8, base default is 32.
@@ -743,21 +775,101 @@ def run_vocal(p: dict) -> None:
         result(i, path, seed, dur, "vocal", p.get("backing_style", ""))
 
 
+def _splice_repair(original_path: str, repaired_path: str,
+                   region_start: float, region_end: float,
+                   out_dir: str) -> str:
+    """
+    Splice the repaired region back into the original audio.
+
+    ACEStep's repaint task returns a full-length audio file where only the
+    masked region differs.  We copy that region's samples into the original
+    so the result is a true in-place patch rather than a full replacement.
+
+    If soundfile is unavailable or anything goes wrong, returns repaired_path
+    unchanged so the caller still gets a usable result.
+    """
+    try:
+        import soundfile as sf
+        import numpy as np
+
+        orig,    sr_o = sf.read(original_path,  dtype="float32", always_2d=True)
+        repaired, sr_r = sf.read(repaired_path, dtype="float32", always_2d=True)
+
+        if sr_o != sr_r:
+            # Mismatched sample rates — can't safely splice; return repaired as-is
+            return repaired_path
+
+        start_samp = int(round(region_start * sr_o))
+        end_samp   = int(round(region_end   * sr_o))
+        start_samp = max(0, min(start_samp, len(orig)))
+        end_samp   = max(start_samp, min(end_samp, len(orig)))
+
+        region_len = end_samp - start_samp
+        if region_len <= 0:
+            return repaired_path
+
+        # Match channel count
+        if orig.shape[1] != repaired.shape[1]:
+            if orig.shape[1] == 1:
+                orig = np.repeat(orig, repaired.shape[1], axis=1)
+            elif repaired.shape[1] == 1:
+                repaired = np.repeat(repaired, orig.shape[1], axis=1)
+
+        # Copy repaired region (same time window from the repainted file)
+        rep_start = min(start_samp, len(repaired))
+        rep_end   = min(end_samp,   len(repaired))
+        patch = repaired[rep_start:rep_end]
+
+        # Pad patch if repainted file was shorter than expected
+        if len(patch) < region_len:
+            pad = np.zeros((region_len - len(patch), orig.shape[1]), dtype=np.float32)
+            patch = np.concatenate([patch, pad])
+
+        spliced = orig.copy()
+        spliced[start_samp:end_samp] = patch[:region_len]
+
+        # Write spliced result next to the original, tagged _repaired
+        orig_stem = Path(original_path).stem
+        out_name  = f"{orig_stem}_repaired_{uuid.uuid4().hex[:6]}.wav"
+        out_path  = str(Path(out_dir) / out_name)
+        sf.write(out_path, spliced, sr_o)
+        return out_path
+
+    except Exception as exc:
+        # Non-fatal — caller gets the raw repainted file instead
+        emit({"type": "error",
+              "message": f"[splice_repair] {type(exc).__name__}: {exc} — returning unspliced result"})
+        return repaired_path
+
+
 def run_repair(p: dict) -> None:
-    out_dir = p["output_dir"]
-    seed    = int(time.time())
+    out_dir      = p["output_dir"]
+    seed         = int(time.time())
+    repair_mode  = p.get("repair_mode", "region")
+    region_start = float(p.get("region_start", 0.0))
+    region_end   = float(p.get("region_end",   0.0))
 
     with HeartbeatThread(1, 1, 0, 10, TOTAL_STEPS,
                          lambda t: f"Loading model... ({int(t)}s)"):
         _get_handlers(p)
 
-    path = _run_generation(p, 1, 1, seed, out_dir, "repair")
-    if path is None:
+    raw_path = _run_generation(p, 1, 1, seed, out_dir, "repair")
+    if raw_path is None:
         return
 
-    dur = get_audio_duration(path)
+    # Splice the repaired region back into the original so the user gets
+    # a patched version of their track, not a full replacement (Bug 2 fix).
+    source = p.get("source_audio", "")
+    if repair_mode == "region" and source and Path(source).exists():
+        progress(1, TOTAL_STEPS - 1, TOTAL_STEPS, "Splicing repaired region…", 1)
+        final_path = _splice_repair(source, raw_path, region_start, region_end, out_dir)
+    else:
+        # Full-file repair — the repainted file IS the result
+        final_path = raw_path
+
+    dur = get_audio_duration(final_path)
     progress(1, TOTAL_STEPS, TOTAL_STEPS, f"Repair done — {dur:.1f}s", 1)
-    result(1, path, seed, dur, "repair", p.get("hint_prompt", ""))
+    result(1, final_path, seed, dur, "repair", p.get("hint_prompt", ""))
 
 
 # ---------------------------------------------------------------------------

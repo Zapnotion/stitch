@@ -29,7 +29,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Stitch")
         self.resize(1060, 700)
-        self.setMinimumSize(860, 560)
+        self.setMinimumSize(960, 620)
 
         # Initialise backend
         self._pipeline  = ACEStepPipeline(
@@ -338,41 +338,74 @@ class MainWindow(QMainWindow):
             #ModeTab {
                 border: none;
                 background: transparent;
-                color: #777;
+                color: #888;
                 padding: 9px 0;
                 font-size: 12px;
                 border-bottom: 2px solid transparent;
             }
             #ModeTab:checked {
-                color: #EFEFEF;
+                color: #FFFFFF;
                 font-weight: 600;
                 border-bottom: 2px solid #378ADD;
+                background: rgba(55, 138, 221, 0.08);
             }
-            #ModeTab:hover { color: #BBB; }
+            #ModeTab:hover { color: #CCCCCC; }
 
             /* Form elements */
-            #FieldLabel { font-size: 11px; color: #888; }
+            #FieldLabel { font-size: 11px; color: #AAAAAA; font-weight: 500; }
             QPlainTextEdit, QLineEdit, QSpinBox, QComboBox {
-                background: #1E1E1E;
-                border: 1px solid #2E2E2E;
+                background: #242424;
+                border: 1px solid #3A3A3A;
                 border-radius: 5px;
-                color: #DEDEDE;
+                color: #E8E8E8;
                 padding: 5px 8px;
                 font-size: 12px;
             }
-            QPlainTextEdit:focus, QLineEdit:focus, QSpinBox:focus {
+            QPlainTextEdit:focus, QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QSpinBox:focus {
                 border-color: #378ADD;
             }
+            QComboBox {
+                padding-right: 24px;   /* room for arrow */
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 22px;
+            }
+            QComboBox::down-arrow {
+                width: 10px;
+                height: 10px;
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #888;
+                margin-right: 6px;
+            }
+            QComboBox::down-arrow:hover { border-top-color: #CCC; }
+            QComboBox QAbstractItemView {
+                background: #242424;
+                border: 1px solid #3A3A3A;
+                selection-background-color: #1B3A5E;
+                color: #E8E8E8;
+                padding: 2px;
+            }
             QSlider::groove:horizontal {
-                background: #2A2A2A;
-                height: 4px;
-                border-radius: 2px;
+                background: #2E2E2E;
+                height: 5px;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #1B3A5E;
+                border-radius: 3px;
             }
             QSlider::handle:horizontal {
-                background: #378ADD;
-                width: 12px; height: 12px;
-                border-radius: 6px;
-                margin: -4px 0;
+                background: #5AAAF0;
+                border: 2px solid #378ADD;
+                width: 14px; height: 14px;
+                border-radius: 7px;
+                margin: -5px 0;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #7EC2F8;
             }
             #Divider { background: #2A2A2A; max-height: 1px; }
 
@@ -398,10 +431,10 @@ class MainWindow(QMainWindow):
                 color: #7EC2F8;
                 border: 1px solid #378ADD;
                 border-radius: 6px;
-                padding: 10px;
-                font-size: 13px;
+                padding: 12px;
+                font-size: 14px;
                 font-weight: 600;
-                margin: 0 14px 8px 14px;
+                margin: 6px 14px 8px 14px;
             }
             #GenBtn:hover    { background: #244A78; }
             #GenBtn:disabled { background: #1A1A1A; color: #444; border-color: #333; }
@@ -420,21 +453,28 @@ class MainWindow(QMainWindow):
             #GenBtnGreen:disabled { background: #1A1A1A; color: #444; border-color: #333; }
 
             #HintLabel { font-size: 10px; color: #555; margin-bottom: 10px; }
+            #SliderValue {
+                font-size: 11px;
+                color: #7EC2F8;
+                font-weight: 600;
+                min-width: 36px;
+            }
+            #FieldLabelDim { font-size: 10px; color: #555; }
 
             /* Info / warn boxes */
             #InfoBox {
                 background: #0F2A47;
-                border: 1px solid #1C4A80;
+                border: 1px solid #2A5A90;
                 border-radius: 6px;
-                color: #6EB4F0;
+                color: #90C8F8;
                 padding: 8px 10px;
                 font-size: 11px;
             }
             #WarnBox {
                 background: #3A2800;
-                border: 1px solid #7A5800;
+                border: 1px solid #8A6400;
                 border-radius: 6px;
-                color: #D4A84B;
+                color: #E8B84B;
                 padding: 8px 10px;
                 font-size: 11px;
             }
@@ -463,8 +503,11 @@ class MainWindow(QMainWindow):
             /* Result card */
             #ResultCard {
                 background: #1A1A1A;
-                border: 1px solid #2A2A2A;
+                border: 1px solid #333;
                 border-radius: 8px;
+            }
+            #ResultCard:hover {
+                border-color: #3A3A3A;
             }
             #CardTitle  { font-size: 12px; font-weight: 600; color: #DEDEDE; }
             #SeedLabel  { font-size: 10px; color: #555; }
@@ -576,14 +619,21 @@ class MainWindow(QMainWindow):
 
             /* Sort combo in results header */
             #SortCombo {
-                background: #1A1A1A;
-                border: 1px solid #2A2A2A;
+                background: #242424;
+                border: 1px solid #3A3A3A;
                 border-radius: 4px;
-                color: #777;
+                color: #CCCCCC;
                 font-size: 11px;
-                padding: 3px 6px;
+                padding: 3px 24px 3px 6px;
             }
-            #SortCombo::drop-down { border: none; width: 16px; }
+            #SortCombo::drop-down { border: none; width: 22px; }
+            #SortCombo::down-arrow {
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #888;
+                margin-right: 6px;
+            }
+            #SortCombo::down-arrow:hover { border-top-color: #CCC; }
 
             /* History page */
             #HistoryTable {
@@ -621,15 +671,15 @@ class MainWindow(QMainWindow):
             #PresetToggle {
                 background: #161616;
                 border: none;
-                border-top: 1px solid #242424;
-                border-bottom: 1px solid #242424;
-                color: #555;
+                border-top: 1px solid #2A2A2A;
+                border-bottom: 1px solid #2A2A2A;
+                color: #888;
                 font-size: 11px;
-                padding: 5px 14px;
+                padding: 6px 14px;
                 text-align: left;
             }
-            #PresetToggle:hover   { color: #888; background: #1A1A1A; }
-            #PresetToggle:checked { color: #AAA; }
+            #PresetToggle:hover   { color: #CCCCCC; background: #1C1C1C; }
+            #PresetToggle:checked { color: #CCCCCC; }
 
             /* Empty state */
             #EmptyState { font-size: 12px; color: #444; }
@@ -675,13 +725,14 @@ class MainWindow(QMainWindow):
             #AdvancedToggle {
                 background: transparent;
                 border: none;
-                color: #555;
+                border-top: 1px solid #242424;
+                color: #777;
                 font-size: 11px;
-                padding: 2px 0;
+                padding: 5px 14px;
                 text-align: left;
             }
-            #AdvancedToggle:hover   { color: #888; }
-            #AdvancedToggle:checked { color: #AAA; }
+            #AdvancedToggle:hover   { color: #BBBBBB; background: #1C1C1C; }
+            #AdvancedToggle:checked { color: #CCCCCC; }
 
             /* Phase 2: section pills in structure builder */
             #SectionPill {
@@ -903,4 +954,177 @@ class MainWindow(QMainWindow):
                 min-width: 20px;
             }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+            /* Splitter drag handle */
+            QSplitter::handle:horizontal {
+                background: #222;
+                width: 4px;
+            }
+            QSplitter::handle:horizontal:hover {
+                background: #378ADD;
+            }
+
+            /* Phase 3: Stem Mixer */
+            #StemMixerPanel {
+                background: #111111;
+                border-top: 1px solid #222;
+            }
+            #MixerHeader {
+                background: #161616;
+                border-bottom: 1px solid #222;
+            }
+            #MixerFooter {
+                background: #111111;
+                border-top: 1px solid #1E1E1E;
+            }
+            #MixerScroll, #MixerScroll > QWidget > QWidget {
+                background: #111111;
+                border: none;
+            }
+            #StemMixerLabel {
+                font-size: 11px;
+                font-weight: 600;
+                color: #AAAAAA;
+                letter-spacing: 0.05em;
+            }
+            #FaderDbLabel {
+                font-size: 10px;
+                color: #666;
+            }
+            #StemFader::groove:vertical {
+                background: #2A2A2A;
+                width: 4px;
+                border-radius: 2px;
+            }
+            #StemFader::handle:vertical {
+                background: #4A4A4A;
+                height: 14px;
+                width: 22px;
+                margin: 0 -9px;
+                border-radius: 3px;
+                border: 1px solid #5A5A5A;
+            }
+            #StemFader::handle:vertical:hover { background: #666; border-color: #888; }
+            #StemFader::sub-page:vertical { background: #378ADD; border-radius: 2px; }
+            #PanSlider::groove:horizontal {
+                background: #2A2A2A;
+                height: 3px;
+                border-radius: 1px;
+            }
+            #PanSlider::handle:horizontal {
+                background: #4A4A4A;
+                width: 10px; height: 10px;
+                border-radius: 5px;
+                margin: -4px 0;
+                border: 1px solid #5A5A5A;
+            }
+            #PanSlider::handle:horizontal:hover { background: #888; }
+            #MuteBtn {
+                background: #1E1E1E;
+                border: 1px solid #2E2E2E;
+                border-radius: 4px;
+                color: #888;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 0;
+            }
+            #MuteBtn:hover { background: #2A2A2A; color: #DDD; }
+            #MuteBtnActive {
+                background: #3A1A1A;
+                border: 1px solid #8A3A3A;
+                border-radius: 4px;
+                color: #E85D5D;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 0;
+            }
+            #SoloBtn {
+                background: #1E1E1E;
+                border: 1px solid #2E2E2E;
+                border-radius: 4px;
+                color: #888;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 0;
+            }
+            #SoloBtn:hover { background: #2A2A2A; color: #DDD; }
+            #SoloBtnActive {
+                background: #2A2800;
+                border: 1px solid #7A6A00;
+                border-radius: 4px;
+                color: #E8C84B;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 0;
+            }
+            #EQToggle {
+                background: transparent;
+                border: none;
+                color: #555;
+                font-size: 10px;
+                padding: 1px 0;
+                text-align: left;
+            }
+            #EQToggle:hover   { color: #888; }
+            #EQToggle:checked { color: #AAA; }
+            #EQSlider::groove:horizontal {
+                background: #222;
+                height: 3px;
+                border-radius: 1px;
+            }
+            #EQSlider::handle:horizontal {
+                background: #4A4A4A;
+                width: 8px; height: 8px;
+                border-radius: 4px;
+                margin: -3px 0;
+            }
+            #EQSlider::handle:horizontal:hover { background: #888; }
+            #EQBandLabel { font-size: 10px; color: #555; }
+            #EQFreqLabel { font-size: 9px;  color: #444; }
+            #ResetEQBtn {
+                background: transparent;
+                border: 1px solid #2A2A2A;
+                border-radius: 4px;
+                color: #555;
+                font-size: 10px;
+                padding: 2px 6px;
+            }
+            #ResetEQBtn:hover { background: #1E1E1E; color: #AAA; border-color: #444; }
+            #PitchCombo {
+                background: #181818;
+                border: 1px solid #2A2A2A;
+                border-radius: 4px;
+                color: #CCC;
+                font-size: 11px;
+                padding: 2px 4px;
+            }
+            #MixerActionBtn {
+                border: 1px solid #2A2A2A;
+                border-radius: 5px;
+                background: transparent;
+                color: #888;
+                padding: 4px 10px;
+                font-size: 11px;
+            }
+            #MixerActionBtn:hover { background: #242424; color: #CCC; }
+            #MixerRenderBtn {
+                border: 1px solid #2E4A2E;
+                border-radius: 5px;
+                background: #1A2E1A;
+                color: #7EC878;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            #MixerRenderBtn:hover  { background: #223822; border-color: #4A9E4A; }
+            #MixerRenderBtn:disabled { background: #1A1A1A; color: #444; border-color: #333; }
+            #MixerFormatCombo {
+                background: #1A1A1A;
+                border: 1px solid #2A2A2A;
+                border-radius: 4px;
+                color: #777;
+                font-size: 11px;
+                padding: 3px 4px;
+            }
+            #MixerStatus { font-size: 10px; color: #555; }
         """)

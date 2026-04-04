@@ -10,4 +10,9 @@ audio-separator[gpu]>=0.27.0
 # CPU-only — never competes with ACEStep's GPU budget.
 # ~150 MB base model downloads on first use.
 whisper-timestamped>=1.15.4
+# Phase 3: broadcast loudness normalisation (−14 LUFS, streaming standard).
+pyloudnorm>=0.1.1
+# Phase 3: vocal pitch correction. Requires rubberband.dll on Windows —
+# bundled in app/libs/ or falls back to librosa.effects.pitch_shift.
+pyrubberband>=0.3.0
 # llama-cpp-python is installed separately by run.bat (needs CUDA flag handling)
