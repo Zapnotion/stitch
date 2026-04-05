@@ -33,6 +33,7 @@ from app.models.generation import (
 from app.ui.widgets.preset_panel import PresetPanel
 from app.ui.widgets.result_card import ResultCard
 from app.ui.widgets.structure_builder import StructureBuilderWidget
+from app.ui.widgets.caption_builder import CaptionBuilderWidget
 from app.ui.widgets.upload_zone import UploadZone
 
 
@@ -147,10 +148,15 @@ class GeneratePage(QWidget):
         self._gen_btn.clicked.connect(self._on_generate)
         left_layout.addWidget(self._gen_btn)
 
-        self._hint_lbl = QLabel(f"ACE-Step · ~10 s each on RTX 3090")
+        self._hint_lbl = QLabel(f"ACE-Step · Quality mode recommended for Suno-level output")
         self._hint_lbl.setObjectName("HintLabel")
         self._hint_lbl.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(self._hint_lbl)
+
+        reset_btn = QPushButton("↺  Reset form to defaults")
+        reset_btn.setObjectName("ResetFormBtn")
+        reset_btn.clicked.connect(self._reset_form)
+        left_layout.addWidget(reset_btn)
 
         splitter.addWidget(left)
 
@@ -379,9 +385,37 @@ class GeneratePage(QWidget):
         lay.addWidget(self._field_label("Style prompt"))
         self._style_prompt = QPlainTextEdit()
         self._style_prompt.setObjectName("PromptBox")
-        self._style_prompt.setPlaceholderText("genre, mood, instruments, vocal style, era…")
+        self._style_prompt.setPlaceholderText(
+            "Describe the sound you want.\n"
+            "e.g. aggressive thrash metal, distorted guitar, pounding drums, "
+            "raspy male vocals, 180 BPM, dark and intense\n"
+            "e.g. dreamy lo-fi hip hop, female vocals, soft piano, vinyl crackle, 75 BPM\n"
+            "Tip: turn on Direct prompt mode in Generation quality for maximum control."
+        )
         self._style_prompt.setFixedHeight(90)
         lay.addWidget(self._style_prompt)
+
+        # --- Caption pre-builder (collapsible) ---
+        self._caption_builder_toggle = QPushButton("▸  Build prompt from parts")
+        self._caption_builder_toggle.setObjectName("AdvancedToggle")
+        self._caption_builder_toggle.setCheckable(True)
+        self._caption_builder_toggle.setChecked(False)
+        lay.addWidget(self._caption_builder_toggle)
+
+        self._caption_builder = CaptionBuilderWidget()
+        self._caption_builder.setVisible(False)
+        # Wire the "Apply to prompt" button to write the assembled caption
+        self._caption_builder.caption_ready.connect(
+            lambda cap: self._style_prompt.setPlainText(cap)
+        )
+        lay.addWidget(self._caption_builder)
+
+        def _toggle_caption_builder(checked: bool) -> None:
+            self._caption_builder_toggle.setText(
+                ("▾" if checked else "▸") + "  Build prompt from parts"
+            )
+            self._caption_builder.setVisible(checked)
+        self._caption_builder_toggle.toggled.connect(_toggle_caption_builder)
 
         # --- Phase 2.4: Micro-genre blend (toggle between blend and manual) ---
         genre_hdr_row = QHBoxLayout()
@@ -492,7 +526,26 @@ class GeneratePage(QWidget):
         seed_lora.addLayout(seed_box)
 
         lora_box = QVBoxLayout()
-        lora_box.addWidget(self._field_label("LoRA"))
+        lora_hdr_row = QHBoxLayout()
+        lora_hdr_row.addWidget(self._field_label("LoRA"))
+        lora_hdr_row.addStretch()
+        # Auto / Manual pill
+        self._lora_mode_row = self._pill_row(["Auto", "Manual"])
+        auto_btn_l, manual_btn_l = self._lora_mode_row.findChildren(QPushButton)[:2]
+        auto_btn_l.setChecked(True)
+        lora_hdr_row.addWidget(self._lora_mode_row)
+        lora_box.addLayout(lora_hdr_row)
+
+        # Auto-select status label
+        self._lora_auto_lbl = QLabel("Will auto-select from style prompt")
+        self._lora_auto_lbl.setObjectName("HintLabel")
+        lora_box.addWidget(self._lora_auto_lbl)
+
+        # Manual combo (hidden by default)
+        self._lora_manual_row = QWidget()
+        lora_manual_inner = QHBoxLayout(self._lora_manual_row)
+        lora_manual_inner.setContentsMargins(0, 0, 0, 0)
+        lora_manual_inner.setSpacing(4)
         self._lora_combo = QComboBox()
         self._lora_combo.setObjectName("SortCombo")
         self._lora_combo.addItem("None")
@@ -502,14 +555,37 @@ class GeneratePage(QWidget):
         refresh_btn.setFixedWidth(26)
         refresh_btn.setToolTip("Rescan LoRA folder")
         refresh_btn.clicked.connect(self._refresh_loras)
-        lora_row = QHBoxLayout()
-        lora_row.setSpacing(4)
-        lora_row.addWidget(self._lora_combo, 1)
-        lora_row.addWidget(refresh_btn)
-        lora_box.addLayout(lora_row)
+        lora_manual_inner.addWidget(self._lora_combo, 1)
+        lora_manual_inner.addWidget(refresh_btn)
+        self._lora_manual_row.setVisible(False)
+        lora_box.addWidget(self._lora_manual_row)
+
+        def _on_lora_mode():
+            is_manual = manual_btn_l.isChecked()
+            self._lora_auto_lbl.setVisible(not is_manual)
+            self._lora_manual_row.setVisible(is_manual)
+        auto_btn_l.clicked.connect(_on_lora_mode)
+        manual_btn_l.clicked.connect(_on_lora_mode)
+
         seed_lora.addLayout(lora_box)
 
         lay.addLayout(seed_lora)
+
+        # --- Generation quality (collapsible) --------------------------------
+        self._quality_toggle = QPushButton("▸  Generation quality")
+        self._quality_toggle.setObjectName("AdvancedToggle")
+        self._quality_toggle.setCheckable(True)
+        self._quality_toggle.setChecked(False)
+        lay.addWidget(self._quality_toggle)
+
+        self._quality_box = self._build_quality_widget()
+        self._quality_box.setVisible(False)
+        lay.addWidget(self._quality_box)
+
+        def _toggle_quality(checked: bool) -> None:
+            self._quality_toggle.setText(("▾" if checked else "▸") + "  Generation quality")
+            self._quality_box.setVisible(checked)
+        self._quality_toggle.toggled.connect(_toggle_quality)
 
         lay.addStretch()
         return w
@@ -752,6 +828,191 @@ class GeneratePage(QWidget):
         self._ref_audio_path: str = ""
 
         return w
+
+    def _build_quality_widget(self) -> QWidget:
+        """
+        Generation quality controls:
+          - Fast / Quality preset pill
+          - Guidance scale  (Quality mode only)
+          - Inference steps (Quality mode only)
+          - Variation diversity (retake_variance)
+          - Energy/dynamics    (omega_scale)
+          - Prompt passthrough toggle
+        """
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 4)
+        lay.setSpacing(10)
+
+        # --- Suno-style quick-load ---
+        suno_btn = QPushButton("✦  Load Suno-style defaults")
+        suno_btn.setObjectName("ActionBtn")
+        suno_btn.setToolTip(
+            "Sets Quality mode with parameters tuned to match Suno's polished, "
+            "punchy commercial sound: higher guidance, more steps, boosted energy."
+        )
+        suno_btn.clicked.connect(self._apply_suno_defaults)
+        lay.addWidget(suno_btn)
+
+        lay.addWidget(self._divider())
+
+        # --- Fast / Quality pill ---
+        lay.addWidget(self._field_label("Mode"))
+        self._quality_preset_row = self._pill_row(["Fast", "Quality"])
+        fast_btn, quality_btn = (
+            self._quality_preset_row.findChildren(QPushButton)[0],
+            self._quality_preset_row.findChildren(QPushButton)[1],
+        )
+        fast_btn.setChecked(True)
+
+        self._quality_info = QLabel(
+            "Fast: turbo model, ~10 s/variation. "
+            "Good for exploring ideas — prompt adherence is loose."
+        )
+        self._quality_info.setObjectName("HintLabel")
+        self._quality_info.setWordWrap(True)
+
+        def _on_preset_pill() -> None:
+            is_quality = quality_btn.isChecked()
+            self._guidance_box.setVisible(is_quality)
+            self._steps_box.setVisible(is_quality)
+            self._quality_info.setText(
+                "Quality: base model, ~40 s/variation. "
+                "Stronger prompt following, clearer vocals, more dynamics. "
+                "Adjust guidance scale to control how literally your prompt is obeyed."
+                if is_quality else
+                "Fast: turbo model, ~10 s/variation. "
+                "Good for exploring ideas — prompt adherence is loose."
+            )
+
+        fast_btn.clicked.connect(_on_preset_pill)
+        quality_btn.clicked.connect(_on_preset_pill)
+        lay.addWidget(self._quality_preset_row)
+        lay.addWidget(self._quality_info)
+
+        # --- Guidance scale (Quality only) ---
+        # Default raised from 7.0 → 7.5: better prompt adherence without artefacts.
+        self._guidance_box = self._make_label_slider_widget(
+            label="Prompt strength",
+            slider_range=(10, 200), default=75,   # ×0.1 → 1.0–20.0, default 7.5
+            hint="How strictly the model follows your style prompt. 7.5 = balanced, 12+ = very literal.",
+            attr_slider="_guidance_slider", attr_val="_guidance_val_lbl",
+            fmt=lambda v: f"{v/10:.1f}",
+        )
+        self._guidance_box.setVisible(False)
+        lay.addWidget(self._guidance_box)
+
+        # --- Inference steps (Quality only) ---
+        # Default raised from 32 → 40: noticeably cleaner vocals and stereo image.
+        self._steps_box = self._make_label_slider_widget(
+            label="Inference steps",
+            slider_range=(20, 60), default=40,
+            hint="More steps = clearer vocals and smoother sound. 40 hits the Suno quality level.",
+            attr_slider="_steps_slider", attr_val="_steps_val_lbl",
+            fmt=str,
+        )
+        self._steps_box.setVisible(False)
+        lay.addWidget(self._steps_box)
+
+        lay.addWidget(self._divider())
+
+        # --- Variation diversity ---
+        self._diversity_box = self._make_label_slider_widget(
+            label="Variation diversity",
+            slider_range=(0, 10), default=5,    # ×0.1 → 0–1
+            hint="How different the 4 variations sound from each other.",
+            attr_slider="_diversity_slider", attr_val="_diversity_val_lbl",
+            fmt=lambda v: f"{v/10:.1f}",
+        )
+        lay.addWidget(self._diversity_box)
+
+        # --- Energy / dynamics ---
+        # Default raised from 10.0 → 12.0: more presence and punch, closer to Suno's mastering.
+        self._omega_box = self._make_label_slider_widget(
+            label="Energy / dynamics",
+            slider_range=(50, 200), default=120,   # ×0.1 → 5–20, default 12.0
+            hint="Higher = more dynamic, punchy output. 12 matches Suno's energetic mastering.",
+            attr_slider="_omega_slider", attr_val="_omega_val_lbl",
+            fmt=lambda v: f"{v/10:.1f}",
+        )
+        lay.addWidget(self._omega_box)
+
+        lay.addWidget(self._divider())
+
+        # --- Prompt passthrough ---
+        self._passthrough_btn = QPushButton("▸  Direct prompt mode")
+        self._passthrough_btn.setObjectName("AdvancedToggle")
+        self._passthrough_btn.setCheckable(True)
+        self._passthrough_btn.setChecked(False)
+        lay.addWidget(self._passthrough_btn)
+
+        self._passthrough_info = QLabel(
+            "Bypasses the AI rewrite — sends your style prompt straight to the music model. "
+            "Use this when the AI keeps ignoring specific genre, BPM, or vocal instructions.\n\n"
+            "Write in tag format (comma-separated descriptors ACEStep responds well to):\n"
+            "• thrash metal, distorted guitar, blast beats, raspy male vocals, 180 BPM, aggressive\n"
+            "• dreamy lo-fi hip hop, female vocals, soft piano, vinyl crackle, slow tempo, melancholy\n"
+            "• cinematic orchestral, strings, french horn, epic, 90 BPM, triumphant\n"
+            "• 90s R&B, smooth female vocals, electric piano, funk bass, 95 BPM, romantic"
+        )
+        self._passthrough_info.setObjectName("HintLabel")
+        self._passthrough_info.setWordWrap(True)
+        self._passthrough_info.setVisible(False)
+        lay.addWidget(self._passthrough_info)
+
+        def _on_passthrough(checked: bool) -> None:
+            self._passthrough_btn.setText(
+                ("▾" if checked else "▸") + "  Direct prompt mode"
+            )
+            self._passthrough_info.setVisible(checked)
+        self._passthrough_btn.toggled.connect(_on_passthrough)
+
+        return w
+
+    def _make_label_slider_widget(self, label: str, slider_range: tuple,
+                                   default: int, hint: str = "",
+                                   attr_slider: str = "", attr_val: str = "",
+                                   fmt=str) -> QWidget:
+        """
+        Build a labelled slider widget and register the slider/value-label
+        on self using attr_slider / attr_val so callers can read values.
+        Returns the container QWidget.
+        """
+        container = QWidget()
+        vlay = QVBoxLayout(container)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(3)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(slider_range[0], slider_range[1])
+        slider.setValue(default)
+        slider.setObjectName("LyricsSlider")
+
+        val_lbl = QLabel(fmt(default))
+        val_lbl.setObjectName("SliderValue")
+        val_lbl.setFixedWidth(42)
+        slider.valueChanged.connect(lambda v, f=fmt, l=val_lbl: l.setText(f(v)))
+
+        header = QHBoxLayout()
+        header.setSpacing(6)
+        header.addWidget(self._field_label(label))
+        header.addStretch()
+        header.addWidget(val_lbl)
+        vlay.addLayout(header)
+        vlay.addWidget(slider)
+
+        if hint:
+            hint_lbl = QLabel(hint)
+            hint_lbl.setObjectName("HintLabel")
+            hint_lbl.setWordWrap(True)
+            vlay.addWidget(hint_lbl)
+
+        if attr_slider:
+            setattr(self, attr_slider, slider)
+        if attr_val:
+            setattr(self, attr_val, val_lbl)
+
+        return container
 
     # --- BPM tap and snap ---------------------------------------------------
 
@@ -1055,6 +1316,7 @@ class GeneratePage(QWidget):
         seed_txt = self._seed_input.text().strip()
         seed     = int(seed_txt) if seed_txt.isdigit() else None
         lora_val = self._lora_combo.currentText()
+        lora_scale_val = 0.0   # 0.0 = worker will use registry recommended_weight
 
         # Determine lyrics mode from pill selection
         mode_pills = self._lyrics_mode_row.findChildren(QPushButton)
@@ -1081,17 +1343,74 @@ class GeneratePage(QWidget):
         style_prompt = self._style_prompt.toPlainText().strip()
         user_lyrics  = self._user_lyrics.toPlainText().strip()
 
+        # Auto LoRA selection: now that style_prompt is resolved, pick the best
+        # matching LoRA from the registry based on its content.
+        lora_auto_btns = self._lora_mode_row.findChildren(QPushButton) if hasattr(self, "_lora_mode_row") else []
+        lora_is_auto = len(lora_auto_btns) > 0 and lora_auto_btns[0].isChecked()
+        if lora_is_auto:
+            from app.backend.lora_manager import auto_select_loras, lora_local_path, recommended_weight
+            matches = auto_select_loras(style_prompt)
+            if matches:
+                best = matches[0]
+                lp = lora_local_path(best["id"], cfg.models_dir)
+                if lp:
+                    lora_val       = str(lp)
+                    lora_scale_val = recommended_weight(best)
+                    self._lora_auto_lbl.setText(
+                        f"Auto: {best['name']}  (scale {lora_scale_val:.2f})"
+                    )
+                else:
+                    self._lora_auto_lbl.setText(
+                        f"Auto: {best['name']} — not downloaded (Settings → LoRAs)"
+                    )
+            else:
+                lora_val = "None"
+                self._lora_auto_lbl.setText("Auto: no matching LoRA — try being more specific")
+
         if (hasattr(self, '_structure_builder')
                 and self._structure_toggle.isChecked()
                 and not self._structure_builder.is_empty()):
             struct_lyrics, caption_hint = self._structure_builder.serialise()
-            # Prepend structure lyrics to any user-typed lyrics
+
             if struct_lyrics:
-                user_lyrics = struct_lyrics
-                lyrics_mode = LyricsMode.USER
+                if user_lyrics:
+                    # User has typed their own lyrics — append the structure
+                    # section tags around them so the DiT sees both.
+                    user_lyrics = struct_lyrics + "\n" + user_lyrics
+                    lyrics_mode = LyricsMode.USER
+                elif lyrics_mode == LyricsMode.USER:
+                    # "I provide" selected but field empty — use structure lyrics
+                    user_lyrics = struct_lyrics
+                # If AI writes is selected and no user lyrics, pass struct_lyrics
+                # as the lyric scaffold but keep AI writes mode so the LLM can
+                # fill in the actual content guided by the section tags.
+                elif lyrics_mode == LyricsMode.AI_WRITES:
+                    # Embed structure tags into the lyrics prompt so the LLM
+                    # writes lyrics that fit the structure, rather than free-form.
+                    existing_lp = self._ai_lyrics_prompt.toPlainText().strip()
+                    struct_hint = f"Use this song structure:\n{struct_lyrics}"
+                    if existing_lp:
+                        self._ai_lyrics_prompt.setPlainText(f"{existing_lp}\n\n{struct_hint}")
+                    else:
+                        self._ai_lyrics_prompt.setPlainText(struct_hint)
+                    # Also pass struct_lyrics as a scaffold so the DiT knows
+                    # the section layout even if the LLM path fails.
+                    user_lyrics = struct_lyrics
+
             # Append energy/mood hints to style prompt
             if caption_hint:
                 style_prompt = f"{style_prompt} {caption_hint}".strip()
+
+        # Quality controls — read widget state, fall back gracefully if not built yet
+        def _has(attr): return hasattr(self, attr) and getattr(self, attr) is not None
+
+        quality_btns = self._quality_preset_row.findChildren(QPushButton) if _has("_quality_preset_row") else []
+        quality_preset = "quality" if len(quality_btns) > 1 and quality_btns[1].isChecked() else "fast"
+        guidance_val   = self._guidance_slider.value() / 10.0 if _has("_guidance_slider") else 7.0
+        steps_val      = self._steps_slider.value()           if _has("_steps_slider")    else None
+        diversity_val  = self._diversity_slider.value() / 10.0 if _has("_diversity_slider") else 0.5
+        omega_val      = self._omega_slider.value()    / 10.0  if _has("_omega_slider")   else 10.0
+        passthrough    = self._passthrough_btn.isChecked()     if _has("_passthrough_btn") else False
 
         req = TextGenerationRequest(
             style_prompt       = style_prompt,
@@ -1105,13 +1424,23 @@ class GeneratePage(QWidget):
             variations         = self._variations_spin.value(),
             duration_secs      = self._duration_spin.value(),
             seed               = seed,
-            lora               = None if lora_val == "None" else str(cfg.models_dir / "loras" / lora_val),
+            lora               = (None if lora_val == "None"
+                               else lora_val if Path(lora_val).is_absolute()
+                               else str(cfg.models_dir / "loras" / lora_val)),
+            lora_scale         = lora_scale_val,
             output_dir         = str(cfg.outputs_dir),
             # Phase 2
             bpm                = bpm_val if bpm_val > 0 else None,
             key                = "" if key_val == "Free" else key_val,
             time_signature     = "" if ts_val == "Free" else ts_val,
             exclusions         = exclusions,
+            # Quality controls
+            quality_preset     = quality_preset,
+            guidance_scale     = guidance_val,
+            infer_steps        = steps_val,
+            retake_variance    = diversity_val,
+            omega_scale        = omega_val,
+            prompt_passthrough = passthrough,
         )
         self._gen_btn.setEnabled(False)
         self._gen_btn.setText("Generating…")
@@ -1556,6 +1885,15 @@ class GeneratePage(QWidget):
                 "key":           self._key_combo.currentText() if hasattr(self, '_key_combo') else "Free",
                 "time_signature": self._time_sig_combo.currentText() if hasattr(self, '_time_sig_combo') else "Free",
                 "exclusions":    self._exclusions.toPlainText() if hasattr(self, '_exclusions') else "",
+                # Quality controls
+                "quality_preset":    (lambda btns: "quality" if len(btns) > 1 and btns[1].isChecked() else "fast")(
+                    self._quality_preset_row.findChildren(QPushButton) if hasattr(self, '_quality_preset_row') else []
+                ),
+                "guidance_scale":    self._guidance_slider.value() / 10.0 if hasattr(self, '_guidance_slider') else 7.0,
+                "infer_steps":       self._steps_slider.value()    if hasattr(self, '_steps_slider')    else 32,
+                "retake_variance":   self._diversity_slider.value() / 10.0 if hasattr(self, '_diversity_slider') else 0.5,
+                "omega_scale":       self._omega_slider.value()    / 10.0  if hasattr(self, '_omega_slider')    else 12.0,
+                "prompt_passthrough": self._passthrough_btn.isChecked() if hasattr(self, '_passthrough_btn') else False,
             }
             return params
         elif mode == "cover":
@@ -1604,6 +1942,24 @@ class GeneratePage(QWidget):
                 self._exclusions.setPlainText(params["exclusions"])
                 if params["exclusions"].strip():
                     self._exclusions_toggle.setChecked(True)
+            # Quality controls
+            if "quality_preset" in params and hasattr(self, '_quality_preset_row'):
+                btns = self._quality_preset_row.findChildren(QPushButton)
+                if len(btns) > 1:
+                    is_q = params["quality_preset"] == "quality"
+                    btns[0].setChecked(not is_q)
+                    btns[1].setChecked(is_q)
+                    btns[0].clicked.emit()   # trigger visibility update
+            if "guidance_scale"  in params and hasattr(self, '_guidance_slider'):
+                self._guidance_slider.setValue(int(float(params["guidance_scale"]) * 10))
+            if "infer_steps"     in params and hasattr(self, '_steps_slider'):
+                self._steps_slider.setValue(int(params["infer_steps"]))
+            if "retake_variance" in params and hasattr(self, '_diversity_slider'):
+                self._diversity_slider.setValue(int(float(params["retake_variance"]) * 10))
+            if "omega_scale"     in params and hasattr(self, '_omega_slider'):
+                self._omega_slider.setValue(int(float(params["omega_scale"]) * 10))
+            if "prompt_passthrough" in params and hasattr(self, '_passthrough_btn'):
+                self._passthrough_btn.setChecked(bool(params["prompt_passthrough"]))
         elif mode == "cover":
             if "target_style"    in params: self._cover_prompt.setPlainText(params["target_style"])
             if "new_lyrics"      in params: self._cover_lyrics.setPlainText(params["new_lyrics"])
@@ -1617,6 +1973,170 @@ class GeneratePage(QWidget):
             if "seed"          in params: self._vox_seed.setText(str(params["seed"]))
 
         self.status_message.emit(f"Preset loaded: {preset_data.get('name', '')}")
+
+    # -----------------------------------------------------------------------
+    # Suno-style defaults
+
+    def _apply_suno_defaults(self) -> None:
+        """
+        Load the parameter set that produces output closest to Suno's polished
+        commercial sound:
+          - Quality mode (base model + CFG)
+          - Guidance scale 8.5  — strong prompt adherence without over-saturation
+          - Inference steps 50  — clean vocals, clear stereo image
+          - Omega (energy) 14.0 — punchy, mastered-sounding dynamics
+          - Variation diversity 0.6 — enough spread across 4 outputs
+          - LoRA auto-select ON — genre-specific LoRA applied at recommended weight
+          - Lyrics mode: AI writes — full CoT lyric generation
+          - Duration: 30 s       — Suno's typical song length
+          - Variations: 4
+
+        Opens the Generation quality panel so the user can see what changed.
+        """
+        # Switch to Quality mode
+        if hasattr(self, '_quality_preset_row'):
+            btns = self._quality_preset_row.findChildren(QPushButton)
+            if len(btns) >= 2:
+                btns[0].setChecked(False)   # Fast
+                btns[1].setChecked(True)    # Quality
+                btns[1].clicked.emit()      # trigger visibility update
+
+        # Guidance scale: 8.5 (stored as ×10 = 85)
+        if hasattr(self, '_guidance_slider'):
+            self._guidance_slider.setValue(85)
+
+        # Inference steps: 50
+        if hasattr(self, '_steps_slider'):
+            self._steps_slider.setValue(50)
+
+        # Energy / dynamics: 14.0 (stored as ×10 = 140)
+        if hasattr(self, '_omega_slider'):
+            self._omega_slider.setValue(140)
+
+        # Variation diversity: 0.6 (stored as ×10 = 6)
+        if hasattr(self, '_diversity_slider'):
+            self._diversity_slider.setValue(6)
+
+        # Duration: 30 s
+        self._duration_spin.setValue(30)
+
+        # Variations: 4
+        self._variations_spin.setValue(4)
+
+        # Lyrics: AI writes
+        pills = self._lyrics_mode_row.findChildren(QPushButton)
+        for i, btn in enumerate(pills):
+            btn.setChecked(i == 0)
+        self._ai_lyrics_prompt.setVisible(True)
+        self._ai_controls.setVisible(True)
+        self._user_lyrics.setVisible(False)
+
+        # Output type: with vocals
+        out_pills = self._output_type_row.findChildren(QPushButton)
+        for i, btn in enumerate(out_pills):
+            btn.setChecked(i == 0)
+
+        # LoRA: Auto
+        lora_pills = self._lora_mode_row.findChildren(QPushButton)
+        if len(lora_pills) >= 2:
+            lora_pills[0].setChecked(True)
+            lora_pills[1].setChecked(False)
+            self._lora_auto_lbl.setVisible(True)
+            self._lora_manual_row.setVisible(False)
+
+        # Open the Generation quality section so user sees the changes
+        if hasattr(self, '_quality_toggle') and not self._quality_toggle.isChecked():
+            self._quality_toggle.setChecked(True)
+            self._quality_toggle.toggled.emit(True)
+
+        self.status_message.emit(
+            "Suno-style defaults loaded — use Quality mode + LoRA auto-select for best results"
+        )
+
+    # -----------------------------------------------------------------------
+    # Reset
+
+    def _reset_form(self) -> None:
+        """Reset all form fields to their default values."""
+        # --- Text panel ---
+        self._style_prompt.setPlainText("")
+        self._ai_lyrics_prompt.setPlainText("")
+        self._user_lyrics.setPlainText("")
+        self._duration_spin.setValue(cfg.default_duration)
+        self._variations_spin.setValue(cfg.default_variations)
+        self._seed_input.clear()
+        if hasattr(self, '_exclusions'):
+            self._exclusions.setPlainText("")
+        if hasattr(self, '_exclusions_toggle'):
+            self._exclusions_toggle.setChecked(False)
+        if hasattr(self, '_bpm_slider'):
+            self._bpm_slider.setValue(0)
+        if hasattr(self, '_key_combo'):
+            self._key_combo.setCurrentIndex(0)
+        if hasattr(self, '_time_sig_combo'):
+            self._time_sig_combo.setCurrentIndex(0)
+        if hasattr(self, '_guidance_slider'):
+            self._guidance_slider.setValue(70)   # 7.0
+        if hasattr(self, '_steps_slider'):
+            self._steps_slider.setValue(32)
+        if hasattr(self, '_diversity_slider'):
+            self._diversity_slider.setValue(5)   # 0.5
+        if hasattr(self, '_omega_slider'):
+            self._omega_slider.setValue(120)      # 12.0 — new Suno-tuned default
+        if hasattr(self, '_passthrough_btn'):
+            self._passthrough_btn.setChecked(False)
+        if hasattr(self, '_creativity_slider'):
+            self._creativity_slider.setValue(5)
+        if hasattr(self, '_adherence_slider'):
+            self._adherence_slider.setValue(7)
+
+        # Reset lyrics mode pill to "AI writes"
+        pills = self._lyrics_mode_row.findChildren(QPushButton)
+        for i, btn in enumerate(pills):
+            btn.setChecked(i == 0)
+        self._ai_lyrics_prompt.setVisible(True)
+        self._ai_controls.setVisible(True)
+        self._user_lyrics.setVisible(False)
+
+        # Reset output type pill to "With vocals"
+        out_pills = self._output_type_row.findChildren(QPushButton)
+        for i, btn in enumerate(out_pills):
+            btn.setChecked(i == 0)
+
+        # Reset LoRA to auto
+        lora_pills = self._lora_mode_row.findChildren(QPushButton)
+        if len(lora_pills) >= 2:
+            lora_pills[0].setChecked(True)
+            lora_pills[1].setChecked(False)
+            self._lora_auto_lbl.setVisible(True)
+            self._lora_manual_row.setVisible(False)
+        self._lora_combo.setCurrentIndex(0)
+
+        # Reset genre blend
+        if hasattr(self, '_genre_slider'):
+            self._genre_slider.setValue(50)
+        if hasattr(self, '_genre_manual_btn') and self._genre_manual_btn.isChecked():
+            self._genre_manual_btn.setChecked(False)
+
+        # Collapse all advanced sections
+        for toggle_attr in ('_ai_advanced_toggle', '_caption_builder_toggle',
+                            '_structure_toggle', '_musical_toggle',
+                            '_quality_toggle', '_exclusions_toggle'):
+            if hasattr(self, toggle_attr):
+                getattr(self, toggle_attr).setChecked(False)
+
+        # --- Cover panel ---
+        self._cover_prompt.setPlainText("")
+        self._cover_strength.setValue(7)
+        self._cover_variations.setValue(4)
+        self._cover_seed.clear()
+
+        # --- Vox panel ---
+        self._vox_prompt.setPlainText("")
+        self._vox_variations.setValue(4)
+        self._vox_seed.clear()
+
+        self.status_message.emit("Form reset to defaults")
 
     # -----------------------------------------------------------------------
     # Helpers

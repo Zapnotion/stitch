@@ -955,6 +955,39 @@ class MainWindow(QMainWindow):
             }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 
+            /* Quality preset pill — Fast highlighted green, Quality highlighted blue */
+            #QualityFastBtn:checked {
+                background: #1A2E1A;
+                color: #7EC878;
+                border-color: #4A9E4A;
+            }
+            #QualityQualityBtn:checked {
+                background: #1B3A5E;
+                color: #7EC2F8;
+                border-color: #378ADD;
+            }
+
+            /* LoRA tag pills in manager */
+            #LoRATag {
+                background: #1B3A5E;
+                color: #7EC2F8;
+                border: 1px solid #2A5A8E;
+                border-radius: 8px;
+                padding: 1px 7px;
+                font-size: 10px;
+            }
+
+            /* Caption builder */
+            #CaptionPreview {
+                background: #1A1A1A;
+                border: 1px solid #2A2A2A;
+                border-radius: 5px;
+                color: #7EC2F8;
+                padding: 8px 10px;
+                font-size: 12px;
+                font-style: italic;
+            }
+
             /* Splitter drag handle */
             QSplitter::handle:horizontal {
                 background: #222;

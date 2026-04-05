@@ -55,12 +55,22 @@ class TextGenerationRequest:
     variations:        int               = 4
     seed:              Optional[int]     = None
     lora:              Optional[str]     = None
+    lora_scale:        float             = 0.0   # 0.0 = use LoRA's recommended_weight from registry
     output_dir:        str               = ""    # resolved by caller from cfg
     # Phase 2 musical parameters
     bpm:               Optional[int]     = None  # 40–200; None = free
     key:               str               = ""    # e.g. "C major", "A minor"; "" = free
     time_signature:    str               = ""    # e.g. "4/4", "6/8"; "" = free
     exclusions:        str               = ""    # negative prompt; appended as "Avoid: ..."
+    # Quality / generation controls
+    quality_preset:    str               = "fast"   # "fast" | "quality"
+    # fast  → turbo model, 8 steps,  guidance_scale=1.0  (no CFG)
+    # quality → base model,  32 steps, guidance_scale=7.0
+    guidance_scale:    float             = 7.0    # 1–20; only meaningful on base model
+    infer_steps:       Optional[int]     = None   # None = preset default
+    retake_variance:   float             = 0.5    # 0=identical variations, 1=wildly different
+    omega_scale:       float             = 10.0   # dynamics/energy; 5–20
+    prompt_passthrough: bool             = False  # bypass LLM rewrite; send caption straight to DiT
 
 
 @dataclass

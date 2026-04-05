@@ -1,0 +1,133 @@
+{
+  "genres": [
+    "acoustic pop", "adult contemporary", "afrobeats", "ambient", "ambient electronic",
+    "anthem rock", "baroque pop", "bedroom pop", "bluegrass", "blues", "blues rock",
+    "bossa nova", "breakbeat", "celtic folk", "chamber pop", "chillhop", "cinematic orchestral",
+    "classic rock", "classical", "country", "country pop", "dark ambient", "death metal",
+    "deep house", "disco", "doom metal", "dream pop", "drill", "drum and bass", "dub",
+    "dubstep", "electronic", "electropop", "emo", "epic orchestral", "folk", "folk rock",
+    "funk", "garage rock", "gospel", "grunge", "hard rock", "hardcore punk", "heavy metal",
+    "hip hop", "house", "indie folk", "indie pop", "indie rock", "industrial",
+    "j-pop", "jazz", "jazz fusion", "k-pop", "latin pop", "lo-fi hip hop",
+    "math rock", "melodic dubstep", "metal", "minimal techno", "motown", "neo-soul",
+    "new wave", "noise rock", "nu jazz", "orchestral pop", "piano ballad", "pop punk",
+    "post-rock", "progressive metal", "progressive rock", "psychedelic", "psychedelic rock",
+    "punk", "punk rock", "R&B", "ragtime", "reggae", "reggaeton", "shoegaze",
+    "singer-songwriter", "ska", "slam poetry", "smooth jazz", "soul", "southern gothic",
+    "speed metal", "synthpop", "synthwave", "techno", "thrash metal", "trance",
+    "trap", "trip hop", "tropical house", "UK garage", "vaporwave", "world music"
+  ],
+  "instruments": [
+    "acoustic guitar", "electric guitar", "distorted electric guitar", "clean electric guitar",
+    "nylon string guitar", "bass guitar", "slap bass", "upright bass",
+    "grand piano", "electric piano", "Rhodes piano", "Wurlitzer", "organ", "church organ", "Hammond organ",
+    "synthesizer", "analog synth", "Moog synthesizer", "pad synth", "lead synth", "arpeggio synth",
+    "drum kit", "electronic drums", "drum machine", "808 drums", "trap drums", "blast beats",
+    "hi-hats", "snare", "kick drum", "live drums",
+    "violin", "viola", "cello", "double bass", "string quartet", "string orchestra",
+    "trumpet", "trombone", "french horn", "tuba", "brass section",
+    "flute", "clarinet", "oboe", "bassoon", "saxophone", "alto saxophone", "tenor saxophone",
+    "harmonica", "banjo", "mandolin", "ukulele", "dobro", "pedal steel guitar",
+    "sitar", "tabla", "djembe", "steel drum", "marimba", "xylophone", "vibraphone",
+    "harp", "harpsichord", "accordion", "bagpipes",
+    "808 bass", "sub bass", "wobble bass", "chopped samples", "vinyl crackle",
+    "orchestra", "full orchestra", "chamber orchestra", "choir", "vocal harmonies"
+  ],
+  "vocal_styles": [
+    "male vocals", "female vocals", "mixed vocals", "no vocals", "instrumental",
+    "deep male vocals", "baritone", "tenor", "bass vocals",
+    "soprano", "mezzo-soprano", "alto",
+    "raspy vocals", "gravelly vocals", "smooth vocals", "silky vocals",
+    "breathy vocals", "airy vocals", "powerful vocals", "belting",
+    "falsetto", "head voice", "chest voice",
+    "aggressive vocals", "screaming", "death growl", "black metal shriek",
+    "spoken word", "rap", "trap rap", "melodic rap", "old school rap",
+    "whispered vocals", "soft vocals", "delicate vocals",
+    "choir vocals", "gospel vocals", "operatic vocals",
+    "auto-tuned vocals", "vocoder", "pitch-shifted vocals",
+    "harmonized vocals", "call and response", "ad-libs",
+    "soulful vocals", "bluesy vocals", "country twang"
+  ],
+  "moods": [
+    "happy", "joyful", "euphoric", "uplifting", "triumphant", "empowering",
+    "sad", "melancholy", "somber", "heartbroken", "longing", "nostalgic", "bittersweet",
+    "angry", "aggressive", "intense", "fierce", "dark", "ominous", "threatening",
+    "calm", "peaceful", "serene", "meditative", "contemplative", "introspective",
+    "tense", "anxious", "unsettling", "eerie", "haunting", "mysterious",
+    "romantic", "sensual", "intimate", "warm", "tender", "hopeful",
+    "epic", "cinematic", "dramatic", "majestic", "grandiose",
+    "playful", "fun", "energetic", "driving", "urgent",
+    "dreamy", "ethereal", "hypnotic", "psychedelic", "surreal",
+    "gritty", "raw", "underground", "rebellious", "defiant"
+  ],
+  "energy": [
+    "very slow", "slow", "mid-tempo", "moderate", "upbeat", "fast", "very fast", "frenetic",
+    "mellow", "laid-back", "chill", "relaxed",
+    "building", "crescendo", "explosive",
+    "heavy", "pounding", "relentless", "driving",
+    "sparse", "minimal", "dense", "lush", "wall of sound"
+  ],
+  "production": [
+    "lo-fi", "hi-fi", "polished", "raw", "overdriven", "distorted", "clean",
+    "reverb-heavy", "dry", "wet", "studio quality", "live recording",
+    "vintage", "retro", "modern", "futuristic",
+    "80s production", "90s production", "2000s production",
+    "analog warmth", "digital precision", "tape saturation",
+    "heavy compression", "punchy mix", "spacious mix",
+    "layered", "minimalist", "orchestrated", "produced",
+    "underground", "bedroom recording", "professional"
+  ],
+  "eras": [
+    "1950s", "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s",
+    "classic era", "golden age", "modern"
+  ],
+  "reference_styles": [
+    "Beatles-style", "Metallica-style", "Radiohead-style", "Daft Punk-style",
+    "Johnny Cash-style", "Aretha Franklin-style", "Miles Davis-style",
+    "Nirvana-style", "Pink Floyd-style", "Bob Dylan-style",
+    "Taylor Swift-style", "Kendrick Lamar-style", "Billie Eilish-style",
+    "Hans Zimmer-style", "Ennio Morricone-style", "John Williams-style"
+  ],
+  "preset_prompts": [
+    {
+      "name": "Thrash Metal",
+      "prompt": "thrash metal, distorted electric guitar, heavy drum kit, blast beats, aggressive male vocals, 180 BPM, dark and intense, 1980s metal production"
+    },
+    {
+      "name": "Lo-fi Hip Hop",
+      "prompt": "lo-fi hip hop, soft female vocals, Rhodes piano, vinyl crackle, chopped samples, mellow, 75 BPM, nostalgic, bedroom recording"
+    },
+    {
+      "name": "Cinematic Epic",
+      "prompt": "cinematic orchestral, full orchestra, french horn, strings, choir, epic, triumphant, 90 BPM, Hans Zimmer-style, powerful"
+    },
+    {
+      "name": "80s Synthwave",
+      "prompt": "synthwave, analog synth, drum machine, bass guitar, 80s production, retro, driving, 120 BPM, neon, nostalgic"
+    },
+    {
+      "name": "Soul R&B",
+      "prompt": "neo-soul, soulful female vocals, electric piano, slap bass, gospel vocals, warm, romantic, 95 BPM, smooth, 1970s production"
+    },
+    {
+      "name": "Post-Rock",
+      "prompt": "post-rock, electric guitar, cello, building crescendo, no vocals, instrumental, epic, 85 BPM, spacious mix, lush"
+    },
+    {
+      "name": "Jazz Fusion",
+      "prompt": "jazz fusion, tenor saxophone, Rhodes piano, upright bass, complex drum kit, improvisational, 110 BPM, Miles Davis-style, sophisticated"
+    },
+    {
+      "name": "Dark Ambient",
+      "prompt": "dark ambient, pad synth, analog warmth, reverb-heavy, ominous, eerie, slow, no vocals, haunting, drone"
+    },
+    {
+      "name": "Folk Ballad",
+      "prompt": "folk, acoustic guitar, breathy female vocals, intimate, melancholy, 70 BPM, singer-songwriter, raw, bittersweet"
+    },
+    {
+      "name": "Trap",
+      "prompt": "trap, 808 bass, hi-hats, trap drums, melodic rap, aggressive, dark, 140 BPM, modern production, punchy mix"
+    }
+  ]
+}

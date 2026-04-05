@@ -244,6 +244,7 @@ class ACEStepV15:
             "variations":         request.variations,
             "seed":               request.seed,
             "lora":               request.lora,
+            "lora_scale":         request.lora_scale,
             "output_dir":         request.output_dir,
             "models_dir":         self.models_dir,
             "device":             self.device,
@@ -252,6 +253,13 @@ class ACEStepV15:
             "key":                request.key,
             "time_signature":     request.time_signature,
             "exclusions":         request.exclusions,
+            # Quality controls
+            "quality_preset":     request.quality_preset,
+            "guidance_scale":     request.guidance_scale,
+            "infer_steps":        request.infer_steps,
+            "retake_variance":    request.retake_variance,
+            "omega_scale":        request.omega_scale,
+            "prompt_passthrough": request.prompt_passthrough,
         }, request.variations, progress_cb)
 
     def generate_cover(

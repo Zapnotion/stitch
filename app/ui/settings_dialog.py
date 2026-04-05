@@ -48,6 +48,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_paths_tab(),      "Paths")
         tabs.addTab(self._build_model_tab(),       "Models")
         tabs.addTab(self._build_export_tab(),      "Export")
+        tabs.addTab(self._build_loras_tab(),       "LoRAs & Models")
         root.addWidget(tabs, 1)
 
         # Buttons
@@ -425,14 +426,24 @@ class SettingsDialog(QDialog):
 
     def _on_reset(self) -> None:
         from PySide6.QtWidgets import QMessageBox
+        from app.config import _DEFAULTS
         reply = QMessageBox.question(
-            self, "Reset Defaults",
-            "Reset all settings to defaults?",
+            self, "Reset to Defaults",
+            "Reset all settings to their default values?\nThis cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            cfg.update({})   # will be repopulated from _DEFAULTS on next load
+            # Replace the entire config with a clean copy of defaults
+            cfg._data = dict(_DEFAULTS)
+            cfg._save()
             self._load_values()
+            log.info("Settings reset to defaults")
+
+    def _build_loras_tab(self) -> QWidget:
+        """LoRA & checkpoint browser/downloader (uses LoRAManagerPanel)."""
+        from app.ui.widgets.lora_manager import LoRAManagerPanel
+        panel = LoRAManagerPanel()
+        return panel
 
     def _open_appdata(self) -> None:
         import subprocess, sys

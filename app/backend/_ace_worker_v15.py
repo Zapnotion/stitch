@@ -160,14 +160,21 @@ def _resolve_project_root(p: dict) -> str:
 def _select_config(p: dict) -> str:
     """
     Select the right ACE-Step config for the generation task.
-    Turbo is fast (8 steps) and works for all tasks.
-    Base is required for repaint / extract / lego tasks.
+
+    quality_preset="fast"    → turbo model (8 steps, no CFG). Quick iteration.
+    quality_preset="quality" → base model (32 steps, CFG on). Better prompt
+                               adherence, clearer vocals, more dynamic range.
+                               Roughly 4× slower on the same GPU.
+    Repair always uses base (repaint task requires it).
+    An explicit "ace_config" key in the payload overrides everything.
     """
+    if "ace_config" in p:
+        return p["ace_config"]
     mode = p.get("mode", "text")
-    if mode in ("repair",):
-        # repaint/editing tasks need base model capabilities
-        return p.get("ace_config", "acestep-v15-base")
-    return p.get("ace_config", "acestep-v15-turbo")
+    if mode == "repair":
+        return "acestep-v15-base"
+    preset = p.get("quality_preset", "fast")
+    return "acestep-v15-base" if preset == "quality" else "acestep-v15-turbo"
 
 
 def _select_device(p: dict) -> str:
@@ -213,12 +220,32 @@ def _get_handlers(p: dict):
 
     # ---- DiT handler ----
     dit = AceStepHandler()
-    progress(1, 2, 10, f"Initialising ACE-Step 1.5 DiT ({config_path}) on {device}...")
-    dit.initialize_service(
-        project_root=project_root,
-        config_path=config_path,
-        device=device,
-    )
+
+    # LoRA: if a path is provided and exists, pass it to initialize_service.
+    # ACEStep expects config_path to be either a named config ("acestep-v15-base")
+    # OR a path to a LoRA adapter directory (which implies base model underneath).
+    # We handle both: use the LoRA folder as config_path when present.
+    lora_path = p.get("lora", "")
+    lora_scale = float(p.get("lora_scale") or 0.0)
+    if lora_path and Path(lora_path).exists():
+        # LoRA requires base model — override turbo if auto-selected
+        effective_config = "acestep-v15-base"
+        progress(1, 2, 10,
+                 f"Initialising ACE-Step 1.5 DiT ({effective_config} + LoRA: "
+                 f"{Path(lora_path).name}) on {device}...")
+        dit.initialize_service(
+            project_root=project_root,
+            config_path=effective_config,
+            device=device,
+            checkpoint=lora_path,
+        )
+    else:
+        progress(1, 2, 10, f"Initialising ACE-Step 1.5 DiT ({config_path}) on {device}...")
+        dit.initialize_service(
+            project_root=project_root,
+            config_path=config_path,
+            device=device,
+        )
 
     # ---- LLM handler ----
     # On Windows with 'pt' backend:
@@ -318,6 +345,50 @@ def _get_handlers(p: dict):
 # Build GenerationParams for each task type
 # ---------------------------------------------------------------------------
 
+def _pre_expand_caption(p: dict) -> str:
+    """
+    Ensure the style_prompt reaching the DiT is in dense tag format.
+
+    Two cases:
+    1. prompt_passthrough=True  — user wants direct control; run through
+       expand_prompt_to_tags() so the DiT gets tags not natural language.
+    2. Normal mode, sparse prompt (<40 chars) — auto-expand so a prompt
+       like "rock music" becomes a full tag set.
+    3. Normal mode, full prompt  — leave it; the LLM will enrich it.
+
+    Returns the (possibly expanded) caption string.
+    """
+    raw = p.get("style_prompt", "").strip()
+    if not raw:
+        return raw
+
+    passthrough = p.get("prompt_passthrough", False)
+    is_sparse   = len(raw) < 40 and "," not in raw   # single-word or short phrase
+
+    if not passthrough and not is_sparse:
+        return raw  # long enough / already tagged — let LLM handle it
+
+    try:
+        _root = Path(__file__).parent.parent.parent
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
+        from app.backend.lyrics_gen import expand_prompt_to_tags, DEFAULT_LYRICS_MODEL
+        models_dir = Path(p["models_dir"]) if p.get("models_dir") else None
+        lyr_model  = p.get("lyrics_model", DEFAULT_LYRICS_MODEL)
+        expanded   = expand_prompt_to_tags(raw, model_name=lyr_model,
+                                           models_dir=models_dir)
+        if expanded and expanded.strip() and expanded.strip() != raw:
+            emit({"type": "progress", "variation_index": 1, "total_variations": 1,
+                  "step": 0, "total_steps": 30,
+                  "message": f"Prompt expanded: {expanded[:80]}…"})
+            return expanded
+    except Exception as exc:
+        emit({"type": "error",
+              "message": f"[caption_expand] {exc} — using raw prompt"})
+
+    return raw
+
+
 def _make_params(p: dict, seed: int, variation_idx: int, total: int,
                  llm_handler=None):
     """
@@ -365,12 +436,14 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
     VOCAL_SCAFFOLD = "[Verse]\n[Chorus]"
 
     if mode == "text":
-        if lyrics_mode == "ai_writes" and llm_handler is not None:
+        if lyrics_mode == "ai_writes" and llm_handler is not None and not p.get("prompt_passthrough"):
             # Full LM path — use create_sample to generate caption + lyrics
             # from the user's query. If create_sample fails (common on Windows
             # pt backend due to constrained decoding issues), fall back to
             # format_sample which takes an explicit caption and enriches it —
             # a safer path that still uses the LLM for lyrics generation.
+            # prompt_passthrough=True bypasses both paths and sends the user's
+            # style_prompt straight to the DiT as-is, preserving all specificity.
             lp = p.get("lyrics_prompt", "").strip()
             query = lp if lp else p.get("style_prompt", "")
 
@@ -457,7 +530,8 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
                     param_update.update(f(keyscale=effective_key))
                 base.update({k: v for k, v in param_update.items() if v is not None})
             else:
-                caption_fb = p.get("style_prompt", "")
+                # LLM failed — expand the raw prompt to tag format as best-effort
+                caption_fb = _pre_expand_caption(p) or p.get("style_prompt", "")
                 time_sig   = p.get("time_signature", "").strip()
                 excl       = p.get("exclusions", "").strip()
                 if time_sig:
@@ -466,7 +540,6 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
                     caption_fb = f"{caption_fb}. Avoid: {excl}".lstrip(". ")
                 user_bpm = p.get("bpm")
                 user_key = p.get("key", "").strip()
-                # Embed BPM and key in caption text as fallback (same rationale as above)
                 if user_bpm:
                     caption_fb = f"{caption_fb}, {int(user_bpm)} BPM"
                 if user_key:
@@ -480,11 +553,9 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
                 if user_key:
                     base.update(f(keyscale=user_key))
         else:
-            # User-provided lyrics (or LLM unavailable).
-            # If user typed lyrics, use them. If user typed nothing but still
-            # wants vocals (with_vocals selected), use the scaffold so the DiT
-            # generates a vocal track rather than defaulting to instrumental.
-            # "[Instrumental]" is ACE-Step's convention for no-vocals generation.
+            # User-provided lyrics, LLM unavailable, OR prompt_passthrough=True.
+            # prompt_passthrough sends the style_prompt straight to the DiT with
+            # no LLM rewriting, preserving specific phrasing and genre detail.
             user_lyrics = p.get("lyrics") or ""
             if instrumental:
                 lyrics_out = "[Instrumental]"
@@ -493,10 +564,14 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
             else:
                 lyrics_out = VOCAL_SCAFFOLD
 
-            # Build caption: start with style_prompt, then append Phase 2 hints.
-            # Time signature has no native GenerationParams field — append as text.
-            # Exclusions become "Avoid: ..." which ACEStep's caption encoder responds to.
-            caption = p.get("style_prompt", "")
+            # Build caption from the user's raw style_prompt.
+            # When prompt_passthrough=True this is sent unmodified — no LLM rewrite.
+            # Phase 2 hints (time sig, exclusions, BPM, key) are still appended
+            # so they reach the DiT's text encoder regardless.
+            # Expand sparse or passthrough prompts to proper ACEStep tag format.
+            caption = _pre_expand_caption(p)
+            if not caption:
+                caption = p.get("style_prompt", "")
             time_sig = p.get("time_signature", "").strip()
             excl     = p.get("exclusions", "").strip()
             if time_sig:
@@ -504,19 +579,22 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
             if excl:
                 caption = f"{caption}. Avoid: {excl}".lstrip(". ")
 
+            # BPM and key embedded in caption text (same belt-and-braces approach
+            # as the LLM path — ensures DiT text encoder sees them).
+            bpm = p.get("bpm")
+            key = p.get("key", "").strip()
+            if bpm:
+                caption = f"{caption}, {int(bpm)} BPM"
+            if key and key not in caption:
+                caption = f"{caption}, {key}"
+
             base.update(f(
                 caption = caption,
                 lyrics  = lyrics_out,
             ))
-
-            # BPM and key — pass through inspect-safe f() so missing fields
-            # on older ACEStep installs are silently dropped.
-            bpm = p.get("bpm")
-            key = p.get("key", "").strip()
             if bpm:
                 base.update(f(bpm=int(bpm)))
             if key:
-                # ACEStep uses "keyscale" field; value format: "C major" / "A minor"
                 base.update(f(keyscale=key))
 
     elif mode == "cover":
@@ -558,20 +636,49 @@ def _make_params(p: dict, seed: int, variation_idx: int, total: int,
             repaint_end      = region_end,
         ))
 
-    # Infer steps — turbo default is 8, base default is 32.
-    # Turbo was designed for low step counts; 8 steps is optimal.
-    # More steps waste VRAM and time without quality gain on turbo.
+    # --- Infer steps, guidance scale, omega, retake variance ---
+    # quality_preset drives the defaults; users can nudge individual sliders.
     config_path = _select_config(p)
-    is_turbo = "turbo" in config_path
-    default_steps = 8 if is_turbo else 32
-    infer_steps = int(p.get("infer_steps", default_steps))
+    is_turbo    = "turbo" in config_path
+
+    # Steps: turbo is distilled — more steps give no benefit, keep at 8.
+    # Base: default 32, user can slide 20–60 for a speed/quality trade-off.
+    if is_turbo:
+        infer_steps = 8
+    else:
+        user_steps  = p.get("infer_steps")
+        infer_steps = int(user_steps) if user_steps else 32
     base.update(f(infer_step=infer_steps))
 
-    # For turbo: guidance_scale must be 1.0 (no CFG).
-    # ACEStep overrides this internally anyway, but setting it explicitly
-    # avoids entering the CFG path before the override kicks in.
+    # Guidance scale: turbo must be 1.0 (unconditional — no CFG path).
+    # On base, default 7.0 gives strong prompt following without over-saturation.
+    # min_guidance_scale set to ~30% of gs to allow natural tail-off at late steps.
     if is_turbo:
         base.update(f(guidance_scale=1.0))
+    else:
+        gs = float(p.get("guidance_scale", 7.0))
+        gs = max(1.0, min(20.0, gs))
+        base.update(f(guidance_scale=gs))
+        base.update(f(min_guidance_scale=max(1.0, round(gs * 0.3, 1))))
+
+    # Omega scale — controls energy and dynamic range (5–20, default 10).
+    # Higher values push the model toward more expressive, dynamic output.
+    omega = float(p.get("omega_scale", 10.0))
+    omega = max(5.0, min(20.0, omega))
+    base.update(f(omega_scale=omega))
+
+    # Retake variance — how independently each variation is sampled (0–1).
+    # 0 = all variations nearly identical; 1 = fully independent seeds.
+    rv = float(p.get("retake_variance", 0.5))
+    rv = max(0.0, min(1.0, rv))
+    base.update(f(retake_variance=rv))
+
+    # LoRA scale — how strongly the LoRA steers the output (0.0–1.0).
+    # lora_path/lora_scale are only in scope in _get_handlers, so read from p.
+    _lora_path  = p.get("lora", "")
+    _lora_scale = float(p.get("lora_scale") or 0.0)
+    if _lora_path and Path(_lora_path).exists() and _lora_scale > 0.0:
+        base.update(f(lora_scale=_lora_scale))
 
     # thinking=True enables ACE-Step's internal LLM chain-of-thought pipeline.
     # CRITICAL: Only set this when the LLM handler is actually initialised.
